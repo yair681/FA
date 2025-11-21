@@ -30,11 +30,6 @@ app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
 const MONGODB_URI = process.env.MONGODB_URI;
 
 console.log('🔗 Connecting to MongoDB...');
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
-  });
 
 // סכמות MongoDB
 const userSchema = new mongoose.Schema({
@@ -103,6 +98,81 @@ const Announcement = mongoose.model('Announcement', announcementSchema);
 const Assignment = mongoose.model('Assignment', assignmentSchema);
 const Event = mongoose.model('Event', eventSchema);
 const Media = mongoose.model('Media', mediaSchema);
+
+// יצירת משתמשים ברירת מחדל אם לא קיימים
+async function createDefaultUsers() {
+  try {
+    console.log('🔧 Checking for default users...');
+    
+    // משתמש מנהל
+    const existingAdmin = await User.findOne({ email: 'yairfrish2@gmail.com' });
+    if (!existingAdmin) {
+      const hashedPassword = await bcrypt.hash('yair12345', 10);
+      const adminUser = new User({
+        name: 'יאיר פריש',
+        email: 'yairfrish2@gmail.com',
+        password: hashedPassword,
+        role: 'admin',
+        classes: [],
+        createdAt: new Date()
+      });
+      await adminUser.save();
+      console.log('✅ Default admin user created: yairfrish2@gmail.com');
+    } else {
+      console.log('✅ Admin user already exists');
+    }
+
+    // משתמש מורה
+    const existingTeacher = await User.findOne({ email: 'teacher@school.com' });
+    if (!existingTeacher) {
+      const hashedPassword = await bcrypt.hash('123456', 10);
+      const teacherUser = new User({
+        name: 'מורה לדוגמה',
+        email: 'teacher@school.com',
+        password: hashedPassword,
+        role: 'teacher',
+        classes: [],
+        createdAt: new Date()
+      });
+      await teacherUser.save();
+      console.log('✅ Default teacher user created: teacher@school.com');
+    } else {
+      console.log('✅ Teacher user already exists');
+    }
+
+    // משתמש תלמיד
+    const existingStudent = await User.findOne({ email: 'student@school.com' });
+    if (!existingStudent) {
+      const hashedPassword = await bcrypt.hash('123456', 10);
+      const studentUser = new User({
+        name: 'תלמיד לדוגמה',
+        email: 'student@school.com',
+        password: hashedPassword,
+        role: 'student',
+        classes: [],
+        createdAt: new Date()
+      });
+      await studentUser.save();
+      console.log('✅ Default student user created: student@school.com');
+    } else {
+      console.log('✅ Student user already exists');
+    }
+
+    console.log('🔧 Default users setup completed');
+  } catch (error) {
+    console.error('❌ Error creating default users:', error);
+  }
+}
+
+// חיבור ל-MongoDB ויצירת משתמשים
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    console.log('✅ Connected to MongoDB');
+    createDefaultUsers();
+  })
+  .catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+  });
 
 // Middleware לאימות
 const authenticateToken = async (req, res, next) => {
