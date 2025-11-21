@@ -10,7 +10,8 @@ class AuthManager {
         if (this.token) {
             await this.validateToken();
         }
-        updateUI();
+        // Don't call updateUI here - it will be called from app.js
+        console.log('🔐 Auth Manager initialized');
     }
 
     async validateToken() {
@@ -94,7 +95,6 @@ class AuthManager {
         this.token = null;
         localStorage.removeItem('token');
         console.log('✅ User logged out');
-        updateUI();
         return { success: true };
     }
 
