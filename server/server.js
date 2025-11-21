@@ -164,11 +164,57 @@ async function createDefaultUsers() {
   }
 }
 
+// יצירת נתוני דמה אם אין נתונים
+async function createSampleData() {
+  try {
+    console.log('🔧 Checking for sample data...');
+    
+    const adminUser = await User.findOne({ email: 'yairfrish2@gmail.com' });
+    if (!adminUser) {
+      console.log('❌ Admin user not found for sample data');
+      return;
+    }
+
+    // בדוק אם יש הודעות
+    const announcementsCount = await Announcement.countDocuments();
+    if (announcementsCount === 0) {
+      console.log('📢 Creating sample announcements...');
+      
+      const sampleAnnouncements = [
+        {
+          title: 'ברוכים הבאים למערכת פרחי אהרון!',
+          content: 'אנו שמחים להשיק את המערכת החדשה לניהול בית הספר. כאן תוכלו למצוא הודעות, משימות, אירועים ועוד.',
+          author: adminUser._id,
+          isGlobal: true,
+          createdAt: new Date()
+        },
+        {
+          title: 'תחילת שנה"ל תשפ"ד',
+          content: 'ברכות לתלמידים ולצוות על פתיחת שנה"ל. נשמח לראות אתכם פעילים ומשתתפים בכל הפעילויות.',
+          author: adminUser._id,
+          isGlobal: true,
+          createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000)
+        }
+      ];
+      
+      await Announcement.insertMany(sampleAnnouncements);
+      console.log('✅ Sample announcements created');
+    } else {
+      console.log(`✅ Already have ${announcementsCount} announcements`);
+    }
+
+  } catch (error) {
+    console.error('❌ Error creating sample data:', error);
+  }
+}
+
 // חיבור ל-MongoDB ויצירת משתמשים
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    createDefaultUsers();
+    createDefaultUsers().then(() => {
+      createSampleData();
+    });
   })
   .catch(err => {
     console.error('❌ MongoDB connection error:', err);
@@ -418,10 +464,10 @@ app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Announcements routes
-app.get('/api/announcements', authenticateToken, async (req, res) => {
+// 🔥 FIX: Announcements routes - MAKE GET PUBLIC
+app.get('/api/announcements', async (req, res) => {
   try {
-    console.log('📢 Announcements requested by:', req.user.email);
+    console.log('📢 Announcements requested');
     const announcements = await Announcement.find()
       .populate('author', 'name')
       .populate('class', 'name')
@@ -528,7 +574,7 @@ app.delete('/api/assignments/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Events routes
+// Events routes - MAKE GET PUBLIC
 app.get('/api/events', async (req, res) => {
   try {
     console.log('📅 Events requested');
@@ -560,7 +606,7 @@ app.post('/api/events', authenticateToken, async (req, res) => {
   }
 });
 
-// Media routes
+// Media routes - MAKE GET PUBLIC
 app.get('/api/media', async (req, res) => {
   try {
     console.log('🖼️ Media requested');
