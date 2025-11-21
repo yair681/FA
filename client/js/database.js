@@ -9,7 +9,7 @@ class DatabaseManager {
         try {
             const headers = {
                 'Content-Type': 'application/json',
-                ...this.getAuthHeaders(),
+                ...(authManager ? authManager.getAuthHeaders() : {}),
                 ...options.headers
             };
 
@@ -22,7 +22,12 @@ class DatabaseManager {
             const response = await fetch(`${this.API_BASE}${endpoint}`, config);
             
             if (response.status === 401) {
-                this.logout();
+                if (authManager) {
+                    authManager.logout();
+                } else {
+                    localStorage.removeItem('token');
+                    window.location.reload();
+                }
                 throw new Error('Authentication required');
             }
 
@@ -48,16 +53,6 @@ class DatabaseManager {
         }
     }
 
-    getAuthHeaders() {
-        const token = localStorage.getItem('token');
-        return token ? { 'Authorization': `Bearer ${token}` } : {};
-    }
-
-    logout() {
-        localStorage.removeItem('token');
-        window.location.reload();
-    }
-
     // ===== USERS =====
     async getUsers() {
         return this.makeRequest('/users');
@@ -67,13 +62,6 @@ class DatabaseManager {
         return this.makeRequest('/users', {
             method: 'POST',
             body: JSON.stringify(userData)
-        });
-    }
-
-    async updateUser(userId, updates) {
-        return this.makeRequest(`/users/${userId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates)
         });
     }
 
@@ -92,13 +80,6 @@ class DatabaseManager {
         return this.makeRequest('/classes', {
             method: 'POST',
             body: JSON.stringify(classData)
-        });
-    }
-
-    async updateClass(classId, updates) {
-        return this.makeRequest(`/classes/${classId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates)
         });
     }
 
@@ -135,13 +116,6 @@ class DatabaseManager {
         return this.makeRequest('/assignments', {
             method: 'POST',
             body: JSON.stringify(assignmentData)
-        });
-    }
-
-    async submitAssignment(assignmentId, submissionData) {
-        return this.makeRequest(`/assignments/${assignmentId}/submit`, {
-            method: 'POST',
-            body: JSON.stringify(submissionData)
         });
     }
 
@@ -202,72 +176,6 @@ class DatabaseManager {
         return this.makeRequest('/classes');
     }
 
-    // ===== AUTH METHODS =====
-    async login(email, password) {
-        try {
-            const response = await fetch(`${this.API_BASE}/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ email, password })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                localStorage.setItem('token', data.token);
-                return { success: true, user: data.user };
-            } else {
-                return { success: false, error: data.error };
-            }
-        } catch (error) {
-            return { success: false, error: 'Network error' };
-        }
-    }
-
-    async register(userData) {
-        try {
-            const response = await fetch(`${this.API_BASE}/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(userData)
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                localStorage.setItem('token', data.token);
-                return { success: true, user: data.user };
-            } else {
-                return { success: false, error: data.error };
-            }
-        } catch (error) {
-            return { success: false, error: 'Network error' };
-        }
-    }
-
-    async validateToken() {
-        try {
-            const response = await fetch(`${this.API_BASE}/validate-token`, {
-                headers: this.getAuthHeaders()
-            });
-
-            if (response.ok) {
-                const userData = await response.json();
-                return { success: true, user: userData };
-            } else {
-                this.logout();
-                return { success: false };
-            }
-        } catch (error) {
-            this.logout();
-            return { success: false };
-        }
-    }
-
     // ===== CHECK API HEALTH =====
     async checkHealth() {
         try {
@@ -284,13 +192,3 @@ class DatabaseManager {
 console.log('🚀 Creating database manager instance...');
 const dbManager = new DatabaseManager();
 
-// Test connection on load
-window.addEventListener('load', async () => {
-    console.log('🔍 Testing API connection...');
-    const health = await dbManager.checkHealth();
-    if (health.success) {
-        console.log('✅ API is healthy:', health.data);
-    } else {
-        console.error('❌ API health check failed:', health.error);
-    }
-});
