@@ -7,6 +7,8 @@ function updateUI() {
     const settingsLink = document.getElementById('settings-link');
     const adminLink = document.getElementById('admin-link');
 
+    console.log('🔄 Updating UI for user:', user ? user.name : 'Guest');
+
     if (user) {
         userDisplay.textContent = user.name;
         loginBtn.style.display = 'none';
@@ -23,16 +25,29 @@ function updateUI() {
         // Show/hide teacher/admin buttons
         const isTeacher = authManager.isTeacher();
         
-        document.getElementById('add-announcement-btn').style.display = isTeacher ? 'block' : 'none';
-        document.getElementById('add-global-announcement-btn').style.display = isTeacher ? 'block' : 'none';
-        document.getElementById('add-class-btn').style.display = isTeacher ? 'block' : 'none';
-        document.getElementById('add-event-btn').style.display = isTeacher ? 'block' : 'none';
-        document.getElementById('add-media-btn').style.display = isTeacher ? 'block' : 'none';
+        // Show add buttons for teachers/admins
+        const addButtons = [
+            'add-announcement-btn',
+            'add-global-announcement-btn', 
+            'add-class-btn',
+            'add-assignment-btn',
+            'add-event-btn',
+            'add-media-btn',
+            'add-user-btn',
+            'admin-add-class-btn'
+        ];
+        
+        addButtons.forEach(btnId => {
+            const btn = document.getElementById(btnId);
+            if (btn) {
+                btn.style.display = isTeacher ? 'block' : 'none';
+            }
+        });
 
-        if (isTeacher) {
-            document.getElementById('teacher-assignments-section').style.display = 'block';
-        } else {
-            document.getElementById('teacher-assignments-section').style.display = 'none';
+        // Show teacher assignments section
+        const teacherSection = document.getElementById('teacher-assignments-section');
+        if (teacherSection) {
+            teacherSection.style.display = isTeacher ? 'block' : 'none';
         }
     } else {
         userDisplay.textContent = 'אורח';
@@ -49,11 +64,15 @@ function updateUI() {
             }
         });
 
-        document.getElementById('teacher-assignments-section').style.display = 'none';
+        const teacherSection = document.getElementById('teacher-assignments-section');
+        if (teacherSection) {
+            teacherSection.style.display = 'none';
+        }
     }
 
     // Reload current page data
     if (window.uiManager && window.uiManager.currentPage) {
+        console.log('🔄 Reloading page data for:', window.uiManager.currentPage);
         window.uiManager.loadPageData(window.uiManager.currentPage);
     }
 }
@@ -71,16 +90,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Wait for all components to load, then initialize
-    setTimeout(() => {
-        // Initialize UI Manager if it exists
-        if (window.uiManager) {
-            window.uiManager.showPage('home');
+    // Wait for auth manager to initialize, then update UI
+    const checkAuthReady = setInterval(() => {
+        if (window.authManager) {
+            clearInterval(checkAuthReady);
+            console.log('✅ Auth manager ready, updating UI');
+            updateUI();
+            
+            // Initialize UI Manager if it exists
+            if (window.uiManager) {
+                window.uiManager.showPage('home');
+            }
+            
+            console.log('✅ Application fully initialized');
         }
-        
-        // Update UI after everything is loaded
-        updateUI();
-        
-        console.log('✅ Application fully initialized');
     }, 100);
 });
+
+// Make updateUI globally available
+window.updateUI = updateUI;
