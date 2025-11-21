@@ -10,8 +10,12 @@ class AuthManager {
         if (this.token) {
             await this.validateToken();
         }
-        // Don't call updateUI here - it will be called from app.js
         console.log('🔐 Auth Manager initialized');
+        
+        // Update UI after initialization
+        if (typeof updateUI === 'function') {
+            setTimeout(updateUI, 100);
+        }
     }
 
     async validateToken() {
@@ -26,6 +30,11 @@ class AuthManager {
                 const userData = await response.json();
                 this.currentUser = userData;
                 console.log('✅ User validated:', userData.name);
+                
+                // Update UI after validation
+                if (typeof updateUI === 'function') {
+                    updateUI();
+                }
                 return true;
             } else {
                 this.logout();
@@ -55,6 +64,11 @@ class AuthManager {
                 this.currentUser = data.user;
                 localStorage.setItem('token', this.token);
                 console.log('✅ Login successful:', data.user.name);
+                
+                // Update UI after successful login
+                if (typeof updateUI === 'function') {
+                    updateUI();
+                }
                 return { success: true, user: this.currentUser };
             } else {
                 return { success: false, error: data.error };
@@ -81,6 +95,11 @@ class AuthManager {
                 this.currentUser = data.user;
                 localStorage.setItem('token', this.token);
                 console.log('✅ Registration successful:', data.user.name);
+                
+                // Update UI after successful registration
+                if (typeof updateUI === 'function') {
+                    updateUI();
+                }
                 return { success: true, user: this.currentUser };
             } else {
                 return { success: false, error: data.error };
@@ -95,6 +114,11 @@ class AuthManager {
         this.token = null;
         localStorage.removeItem('token');
         console.log('✅ User logged out');
+        
+        // Update UI after logout
+        if (typeof updateUI === 'function') {
+            updateUI();
+        }
         return { success: true };
     }
 
