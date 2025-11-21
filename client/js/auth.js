@@ -6,10 +6,11 @@ class AuthManager {
         this.init();
     }
 
-    init() {
+    async init() {
         if (this.token) {
-            this.validateToken();
+            await this.validateToken();
         }
+        updateUI();
     }
 
     async validateToken() {
@@ -23,13 +24,16 @@ class AuthManager {
             if (response.ok) {
                 const userData = await response.json();
                 this.currentUser = userData;
-                updateUI();
+                console.log('✅ User validated:', userData.name);
+                return true;
             } else {
                 this.logout();
+                return false;
             }
         } catch (error) {
             console.error('Token validation error:', error);
             this.logout();
+            return false;
         }
     }
 
@@ -49,6 +53,7 @@ class AuthManager {
                 this.token = data.token;
                 this.currentUser = data.user;
                 localStorage.setItem('token', this.token);
+                console.log('✅ Login successful:', data.user.name);
                 return { success: true, user: this.currentUser };
             } else {
                 return { success: false, error: data.error };
@@ -74,6 +79,7 @@ class AuthManager {
                 this.token = data.token;
                 this.currentUser = data.user;
                 localStorage.setItem('token', this.token);
+                console.log('✅ Registration successful:', data.user.name);
                 return { success: true, user: this.currentUser };
             } else {
                 return { success: false, error: data.error };
@@ -87,15 +93,19 @@ class AuthManager {
         this.currentUser = null;
         this.token = null;
         localStorage.removeItem('token');
+        console.log('✅ User logged out');
         updateUI();
         return { success: true };
     }
 
     getAuthHeaders() {
-        return {
-            'Authorization': `Bearer ${this.token}`,
-            'Content-Type': 'application/json'
-        };
+        if (this.token) {
+            return {
+                'Authorization': `Bearer ${this.token}`,
+                'Content-Type': 'application/json'
+            };
+        }
+        return { 'Content-Type': 'application/json' };
     }
 
     isAdmin() {
@@ -108,6 +118,10 @@ class AuthManager {
 
     isStudent() {
         return this.currentUser && this.currentUser.role === 'student';
+    }
+
+    isAuthenticated() {
+        return this.currentUser !== null;
     }
 }
 
