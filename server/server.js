@@ -21,8 +21,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 app.use(cors());
 app.use(express.json());
 
-// הגשה סטטית - הכי פשוט
-app.use(express.static('client'));
+// ✅ FIXED: Serve static files from the CORRECT path
+// The files are in /opt/render/project/src/client/ NOT /opt/render/project/src/server/client/
+app.use(express.static(path.join(__dirname, '..', 'client')));
+app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
+app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
 
 // חיבור ל-MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -34,7 +37,7 @@ mongoose.connect(MONGODB_URI)
     console.error('❌ MongoDB connection error:', err);
   });
 
-// סכמות ומודלים (קוד מקוצר)
+// סכמות ומודלים (מקוצר)
 const userSchema = new mongoose.Schema({
   name: String, email: String, password: String, role: String, classes: Array,
   createdAt: { type: Date, default: Date.now }
@@ -44,7 +47,14 @@ const User = mongoose.model('User', userSchema);
 
 // Routes בסיסיים
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Server is running',
+    paths: {
+      currentDir: __dirname,
+      clientDir: path.join(__dirname, '..', 'client')
+    }
+  });
 });
 
 app.post('/api/register', async (req, res) => {
@@ -79,13 +89,14 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// הגשת הקבצים הסטטיים
+// ✅ FIXED: Serve index.html from the CORRECT path
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'client', 'index.html'));
+  res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
 
-// האזנה
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📁 Serving files from: ${path.join(__dirname, 'client')}`);
+  console.log(`📁 Current directory: ${__dirname}`);
+  console.log(`📁 Client directory: ${path.join(__dirname, '..', 'client')}`);
+  console.log(`✅ Static files should be served from: ${path.join(__dirname, '..', 'client')}`);
 });
