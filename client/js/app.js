@@ -70,7 +70,7 @@ function updateUI() {
         }
     }
 
-    // Reload current page data
+    // 🔥 FIX: Always reload current page data when UI updates
     if (window.uiManager && window.uiManager.currentPage) {
         console.log('🔄 Reloading page data for:', window.uiManager.currentPage);
         window.uiManager.loadPageData(window.uiManager.currentPage);
@@ -90,22 +90,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Initialize UI Manager first - show home page
+    if (window.uiManager) {
+        console.log('✅ UI Manager found, showing home page');
+        window.uiManager.showPage('home');
+    } else {
+        console.log('❌ UI Manager not found');
+    }
+    
     // Wait for auth manager to initialize, then update UI
     const checkAuthReady = setInterval(() => {
         if (window.authManager) {
             clearInterval(checkAuthReady);
             console.log('✅ Auth manager ready, updating UI');
-            updateUI();
             
-            // Initialize UI Manager if it exists
-            if (window.uiManager) {
-                window.uiManager.showPage('home');
-            }
-            
-            console.log('✅ Application fully initialized');
+            // Force update UI after auth is ready
+            setTimeout(() => {
+                updateUI();
+                console.log('✅ Application fully initialized');
+            }, 500);
         }
     }, 100);
+
+    // Also try to update UI after a longer delay as backup
+    setTimeout(() => {
+        if (window.authManager && window.uiManager) {
+            console.log('🕒 Backup UI update');
+            updateUI();
+        }
+    }, 2000);
 });
 
 // Make updateUI globally available
 window.updateUI = updateUI;
+
+// Add global error handler
+window.addEventListener('error', function(e) {
+    console.error('Global error:', e.error);
+});
+
+// Add unhandled promise rejection handler
+window.addEventListener('unhandledrejection', function(e) {
+    console.error('Unhandled promise rejection:', e.reason);
+});
