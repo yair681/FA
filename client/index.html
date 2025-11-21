@@ -43,12 +43,10 @@
             <!-- Home Page -->
             <div id="home-page" class="page">
                 <div class="hero">
-                    <h2>בהתלהבות מסיימים כיתה ומתלבטים איפה להמשיך שנה הבאה</h2>
+                    <h2>מסיימים כיתה ומתלבטים איפה להמשיך שנה הבאה</h2>
                     <p>בואו והצטרפו אלינו</p>
                     <a href="https://68fdda4e0b7f0.site123.me/" class="btn btn-secondary">לחצו כאן</a>
                 </div>
-                
-                <!-- ✅ REMOVED: Announcements section from home page -->
             </div>
             
             <!-- Announcements Page -->
@@ -381,6 +379,79 @@
                 </div>
                 
                 <button type="submit" class="btn">יצירת כיתה</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Class Modal -->
+    <div id="edit-class-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>עריכת כיתה</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <form id="edit-class-form">
+                <div class="form-group">
+                    <label for="edit-class-name">שם הכיתה</label>
+                    <input type="text" id="edit-class-name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-class-teachers">מורים</label>
+                    <select id="edit-class-teachers" multiple>
+                        <!-- Teachers will be populated dynamically -->
+                    </select>
+                    <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה מורים</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-class-students">תלמידים</label>
+                    <select id="edit-class-students" multiple>
+                        <!-- Students will be populated dynamically -->
+                    </select>
+                    <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה תלמידים</small>
+                </div>
+                
+                <button type="submit" class="btn">שמירת שינויים</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="edit-user-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>עריכת משתמש</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <form id="edit-user-form">
+                <div class="form-group">
+                    <label for="edit-user-name">שם מלא</label>
+                    <input type="text" id="edit-user-name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-user-email">אימייל</label>
+                    <input type="email" id="edit-user-email" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-user-role">תפקיד</label>
+                    <select id="edit-user-role" required>
+                        <option value="student">תלמיד</option>
+                        <option value="teacher">מורה</option>
+                        <option value="admin">מנהל מערכת</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-user-password">סיסמה חדשה (לא חובה)</label>
+                    <input type="password" id="edit-user-password" placeholder="השאר ריק אם לא רוצה לשנות">
+                </div>
+                
+                <button type="submit" class="btn">שמירת שינויים</button>
             </form>
         </div>
     </div>
