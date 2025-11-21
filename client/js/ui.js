@@ -71,6 +71,7 @@ class UIManager {
 
     async loadPageData(pageId) {
         try {
+            console.log(`📄 Loading page data for: ${pageId}`);
             switch (pageId) {
                 case 'home':
                     await this.loadHomePage();
@@ -114,14 +115,20 @@ class UIManager {
     }
 
     async loadClassesPage() {
-        if (!authManager.currentUser) return;
+        if (!authManager.currentUser) {
+            document.getElementById('classes-list').innerHTML = '<p>יש להתחבר כדי לצפות בכיתות</p>';
+            return;
+        }
         
         const classes = await dbManager.getUserClasses();
         this.renderClasses(classes, 'classes-list');
     }
 
     async loadAssignmentsPage() {
-        if (!authManager.currentUser) return;
+        if (!authManager.currentUser) {
+            document.getElementById('assignments-list').innerHTML = '<p>יש להתחבר כדי לצפות במשימות</p>';
+            return;
+        }
         
         const assignments = await dbManager.getAssignments();
         
@@ -145,7 +152,10 @@ class UIManager {
     }
 
     async loadSettingsPage() {
-        if (!authManager.currentUser) return;
+        if (!authManager.currentUser) {
+            document.getElementById('user-classes-list').innerHTML = '<p>יש להתחבר כדי לצפות בהגדרות</p>';
+            return;
+        }
         
         const classes = await dbManager.getUserClasses();
         this.renderUserClasses(classes, 'user-classes-list');
@@ -157,7 +167,11 @@ class UIManager {
     }
 
     async loadAdminPage() {
-        if (!authManager.currentUser || !authManager.isAdmin()) return;
+        if (!authManager.currentUser || !authManager.isAdmin()) {
+            document.getElementById('users-list').innerHTML = '<p>גישת מנהל נדרשת</p>';
+            document.getElementById('admin-classes-list').innerHTML = '<p>גישת מנהל נדרשת</p>';
+            return;
+        }
         
         const users = await dbManager.getUsers();
         this.renderUsers(users, 'users-list');
@@ -170,7 +184,7 @@ class UIManager {
     renderAnnouncements(announcements, containerId, showActions = false) {
         const container = document.getElementById(containerId);
         
-        if (announcements.length === 0) {
+        if (!announcements || announcements.length === 0) {
             container.innerHTML = '<p>אין הודעות להצגה</p>';
             return;
         }
@@ -204,7 +218,7 @@ class UIManager {
     renderClasses(classes, containerId) {
         const container = document.getElementById(containerId);
         
-        if (classes.length === 0) {
+        if (!classes || classes.length === 0) {
             container.innerHTML = '<p>אין כיתות להצגה</p>';
             return;
         }
@@ -230,7 +244,7 @@ class UIManager {
     renderAssignments(assignments, containerId) {
         const container = document.getElementById(containerId);
         
-        if (assignments.length === 0) {
+        if (!assignments || assignments.length === 0) {
             container.innerHTML = '<p>אין משימות להצגה</p>';
             return;
         }
@@ -255,7 +269,7 @@ class UIManager {
     renderTeacherAssignments(assignments, containerId) {
         const container = document.getElementById(containerId);
         
-        if (assignments.length === 0) {
+        if (!assignments || assignments.length === 0) {
             container.innerHTML = '<p>אין משימות להצגה</p>';
             return;
         }
@@ -281,7 +295,7 @@ class UIManager {
     renderEvents(events, containerId) {
         const container = document.getElementById(containerId);
         
-        if (events.length === 0) {
+        if (!events || events.length === 0) {
             container.innerHTML = '<p>אין אירועים להצגה</p>';
             return;
         }
@@ -303,7 +317,7 @@ class UIManager {
     renderMedia(media, containerId) {
         const container = document.getElementById(containerId);
         
-        if (media.length === 0) {
+        if (!media || media.length === 0) {
             container.innerHTML = '<p>אין מדיה להצגה</p>';
             return;
         }
@@ -338,7 +352,7 @@ class UIManager {
     renderUserClasses(classes, containerId) {
         const container = document.getElementById(containerId);
         
-        if (classes.length === 0) {
+        if (!classes || classes.length === 0) {
             container.innerHTML = '<p>אין כיתות להצגה</p>';
             return;
         }
@@ -355,7 +369,7 @@ class UIManager {
     renderUsers(users, containerId) {
         const container = document.getElementById(containerId);
         
-        if (users.length === 0) {
+        if (!users || users.length === 0) {
             container.innerHTML = '<p>אין משתמשים להצגה</p>';
             return;
         }
@@ -385,7 +399,7 @@ class UIManager {
     renderAdminClasses(classes, containerId) {
         const container = document.getElementById(containerId);
         
-        if (classes.length === 0) {
+        if (!classes || classes.length === 0) {
             container.innerHTML = '<p>אין כיתות להצגה</p>';
             return;
         }
@@ -425,6 +439,11 @@ class UIManager {
     }
 
     async openAddAnnouncementModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
         const modal = document.getElementById('add-announcement-modal');
         modal.style.display = 'flex';
         
@@ -439,6 +458,11 @@ class UIManager {
     }
 
     async openAddAssignmentModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
         const modal = document.getElementById('add-assignment-modal');
         modal.style.display = 'flex';
         
@@ -451,12 +475,22 @@ class UIManager {
     }
 
     openAddUserModal() {
+        if (!authManager.isAdmin()) {
+            this.showError('גישת מנהל נדרשת');
+            return;
+        }
+
         const modal = document.getElementById('add-user-modal');
         modal.style.display = 'flex';
         document.getElementById('add-user-form').onsubmit = (e) => this.handleAddUser(e);
     }
 
     async openAddClassModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
         const modal = document.getElementById('add-class-modal');
         modal.style.display = 'flex';
         
