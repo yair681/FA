@@ -53,8 +53,8 @@ function updateUI() {
     }
 
     // Reload current page data
-    if (uiManager.currentPage) {
-        uiManager.loadPageData(uiManager.currentPage);
+    if (window.uiManager && window.uiManager.currentPage) {
+        window.uiManager.loadPageData(window.uiManager.currentPage);
     }
 }
 
@@ -65,13 +65,22 @@ document.addEventListener('DOMContentLoaded', function() {
     // Close modals when clicking outside
     window.addEventListener('click', (e) => {
         if (e.target.classList.contains('modal')) {
-            uiManager.closeAllModals();
+            if (window.uiManager) {
+                window.uiManager.closeAllModals();
+            }
         }
     });
 
-    // Initialize with home page
-    uiManager.showPage('home');
-    
-    // Initial UI update
-    updateUI();
+    // Wait for all components to load, then initialize
+    setTimeout(() => {
+        // Initialize UI Manager if it exists
+        if (window.uiManager) {
+            window.uiManager.showPage('home');
+        }
+        
+        // Update UI after everything is loaded
+        updateUI();
+        
+        console.log('✅ Application fully initialized');
+    }, 100);
 });
