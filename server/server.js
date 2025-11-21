@@ -14,15 +14,24 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key-for-development';
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Middleware - CORS
+app.use(cors({
+  origin: ['https://fa-v8kd.onrender.com', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
-// Serve static files from client directory
-app.use(express.static(path.join(__dirname, '../client')));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from client directory - FIXED
+app.use(express.static(path.join(__dirname, 'client')));
+app.use('/css', express.static(path.join(__dirname, 'client', 'css')));
+app.use('/js', express.static(path.join(__dirname, 'client', 'js')));
 
 // חיבור ל-MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -41,8 +50,6 @@ mongoose.connect(MONGODB_URI)
   });
 
 // סכמות MongoDB
-
-// סכמת משתמש
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -52,7 +59,6 @@ const userSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// סכמת כיתה
 const classSchema = new mongoose.Schema({
   name: { type: String, required: true },
   teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -62,7 +68,6 @@ const classSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// סכמת הודעה
 const announcementSchema = new mongoose.Schema({
   title: { type: String, required: true },
   content: { type: String, required: true },
@@ -72,7 +77,6 @@ const announcementSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// סכמת משימה
 const assignmentSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
@@ -88,7 +92,6 @@ const assignmentSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// סכמת אירוע
 const eventSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, required: true },
@@ -97,7 +100,6 @@ const eventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// סכמת מדיה
 const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, enum: ['image', 'video'], required: true },
@@ -127,7 +129,6 @@ const authenticateToken = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     
-    // בדיקה שהמשתמש עדיין קיים במסד הנתונים
     const user = await User.findById(decoded.userId).select('-password');
     if (!user) {
       return res.status(403).json({ error: 'User not found' });
@@ -145,8 +146,6 @@ const authenticateToken = async (req, res, next) => {
 };
 
 // Routes
-
-// Route בסיסי לבדיקת חיבור
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
@@ -161,7 +160,6 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
     
-    // ולידציה
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: 'All fields are required' });
     }
@@ -170,16 +168,13 @@ app.post('/api/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
-    // בדיקה אם המשתמש כבר קיים
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists with this email' });
     }
 
-    // הצפנת סיסמה
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // יצירת משתמש
     const user = new User({
       name,
       email,
@@ -190,7 +185,6 @@ app.post('/api/register', async (req, res) => {
 
     await user.save();
 
-    // יצירת token
     const token = jwt.sign(
       { 
         userId: user._id, 
@@ -222,24 +216,20 @@ app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // ולידציה
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // מציאת משתמש
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ error: 'Invalid email or password' });
     }
 
-    // בדיקת סיסמה
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(400).json({ error: 'Invalid email or password' });
     }
 
-    // יצירת token
     const token = jwt.sign(
       { 
         userId: user._id, 
@@ -266,552 +256,23 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// ולידציית token
-app.get('/api/validate-token', authenticateToken, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId).select('-password');
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role
-    });
-  } catch (error) {
-    console.error('Token validation error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// משתמשים
-app.get('/api/users', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const users = await User.find().select('-password').populate('classes', 'name');
-    res.json(users);
-  } catch (error) {
-    console.error('Get users error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/users', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const { name, email, password, role } = req.body;
-
-    // ולידציה
-    if (!name || !email || !password || !role) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    // בדיקה אם המשתמש כבר קיים
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ error: 'User already exists with this email' });
-    }
-
-    // הצפנת סיסמה
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const user = new User({
-      name,
-      email,
-      password: hashedPassword,
-      role,
-      classes: []
-    });
-
-    await user.save();
-
-    res.status(201).json({
-      message: 'User created successfully',
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
-    });
-  } catch (error) {
-    console.error('Create user error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.delete('/api/users/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    // מניעת מחיקת מנהל המערכת הראשי
-    if (user.email === 'yairfrish2@gmail.com') {
-      return res.status(403).json({ error: 'Cannot delete primary admin user' });
-    }
-
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'User deleted successfully' });
-  } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// כיתות
-app.get('/api/classes', authenticateToken, async (req, res) => {
-  try {
-    let classes;
-    
-    if (req.user.role === 'admin') {
-      classes = await Class.find()
-        .populate('teacher', 'name email')
-        .populate('teachers', 'name email')
-        .populate('students', 'name email');
-    } else if (req.user.role === 'teacher') {
-      classes = await Class.find({
-        $or: [
-          { teacher: req.user.userId },
-          { teachers: req.user.userId }
-        ]
-      })
-      .populate('teacher', 'name email')
-      .populate('teachers', 'name email')
-      .populate('students', 'name email');
-    } else {
-      // תלמיד - רק הכיתות שהוא רשום אליהן
-      classes = await Class.find({ students: req.user.userId })
-        .populate('teacher', 'name email')
-        .populate('teachers', 'name email')
-        .populate('students', 'name email');
-    }
-
-    res.json(classes);
-  } catch (error) {
-    console.error('Get classes error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/classes', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const { name, teachers } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'Class name is required' });
-    }
-
-    // יצירת מערך המורים - כולל המשתמש הנוכחי
-    const allTeachers = [req.user.userId, ...(teachers || [])];
-
-    const newClass = new Class({
-      name,
-      teacher: req.user.userId,
-      teachers: allTeachers,
-      students: []
-    });
-
-    await newClass.save();
-    
-    // Population for response
-    await newClass.populate('teacher', 'name email');
-    await newClass.populate('teachers', 'name email');
-
-    res.status(201).json(newClass);
-  } catch (error) {
-    console.error('Create class error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const classItem = await Class.findById(req.params.id);
-    if (!classItem) {
-      return res.status(404).json({ error: 'Class not found' });
-    }
-
-    // וידוא שרק המורה שיצר את הכיתה או מנהל יכולים למחוק
-    if (req.user.role !== 'admin' && classItem.teacher.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'You can only delete classes you created' });
-    }
-
-    await Class.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Class deleted successfully' });
-  } catch (error) {
-    console.error('Delete class error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// הודעות
-app.get('/api/announcements', authenticateToken, async (req, res) => {
-  try {
-    let announcements;
-    
-    if (req.user.role === 'student') {
-      // תלמיד רואה הודעות כלליות והודעות של הכיתות שלו
-      const userClasses = await Class.find({ students: req.user.userId });
-      const classIds = userClasses.map(c => c._id);
-      
-      announcements = await Announcement.find({
-        $or: [
-          { isGlobal: true },
-          { class: { $in: classIds } }
-        ]
-      })
-      .populate('author', 'name')
-      .populate('class', 'name')
-      .sort({ createdAt: -1 });
-    } else {
-      // מורה או מנהל רואה הכל
-      announcements = await Announcement.find()
-        .populate('author', 'name')
-        .populate('class', 'name')
-        .sort({ createdAt: -1 });
-    }
-
-    res.json(announcements);
-  } catch (error) {
-    console.error('Get announcements error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/announcements', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const { title, content, isGlobal, classId } = req.body;
-
-    if (!title || !content) {
-      return res.status(400).json({ error: 'Title and content are required' });
-    }
-
-    const announcement = new Announcement({
-      title,
-      content,
-      author: req.user.userId,
-      isGlobal: isGlobal || false,
-      class: classId || null
-    });
-
-    await announcement.save();
-    
-    // Population for response
-    await announcement.populate('author', 'name');
-    await announcement.populate('class', 'name');
-
-    res.status(201).json(announcement);
-  } catch (error) {
-    console.error('Create announcement error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const announcement = await Announcement.findById(req.params.id);
-    if (!announcement) {
-      return res.status(404).json({ error: 'Announcement not found' });
-    }
-
-    // וידוא שרק המחבר או מנהל יכולים למחוק
-    if (req.user.role !== 'admin' && announcement.author.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'You can only delete your own announcements' });
-    }
-
-    await Announcement.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Announcement deleted successfully' });
-  } catch (error) {
-    console.error('Delete announcement error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// משימות
-app.get('/api/assignments', authenticateToken, async (req, res) => {
-  try {
-    let assignments;
-    
-    if (req.user.role === 'student') {
-      // תלמיד רואה משימות של הכיתות שלו
-      const userClasses = await Class.find({ students: req.user.userId });
-      const classIds = userClasses.map(c => c._id);
-      
-      assignments = await Assignment.find({ class: { $in: classIds } })
-        .populate('class', 'name')
-        .populate('teacher', 'name')
-        .sort({ dueDate: 1 });
-    } else {
-      // מורה או מנהל רואה משימות שהוא יצר
-      assignments = await Assignment.find({ teacher: req.user.userId })
-        .populate('class', 'name')
-        .populate('teacher', 'name')
-        .sort({ dueDate: 1 });
-    }
-
-    res.json(assignments);
-  } catch (error) {
-    console.error('Get assignments error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/assignments', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const { title, description, classId, dueDate } = req.body;
-
-    if (!title || !description || !classId || !dueDate) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    // בדיקה שהכיתה קיימת ושהמורה מלמד בה
-    const classItem = await Class.findById(classId);
-    if (!classItem) {
-      return res.status(404).json({ error: 'Class not found' });
-    }
-
-    if (!classItem.teachers.includes(req.user.userId) && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'You are not a teacher in this class' });
-    }
-
-    const assignment = new Assignment({
-      title,
-      description,
-      class: classId,
-      teacher: req.user.userId,
-      dueDate,
-      submissions: []
-    });
-
-    await assignment.save();
-    
-    // Population for response
-    await assignment.populate('class', 'name');
-    await assignment.populate('teacher', 'name');
-
-    res.status(201).json(assignment);
-  } catch (error) {
-    console.error('Create assignment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.delete('/api/assignments/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const assignment = await Assignment.findById(req.params.id);
-    if (!assignment) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-
-    // וידוא שרק המחבר או מנהל יכולים למחוק
-    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'You can only delete your own assignments' });
-    }
-
-    await Assignment.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Assignment deleted successfully' });
-  } catch (error) {
-    console.error('Delete assignment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// אירועים
-app.get('/api/events', async (req, res) => {
-  try {
-    const events = await Event.find()
-      .populate('author', 'name')
-      .sort({ date: 1 });
-    res.json(events);
-  } catch (error) {
-    console.error('Get events error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/events', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const { title, description, date } = req.body;
-
-    if (!title || !description || !date) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    const event = new Event({
-      title,
-      description,
-      date,
-      author: req.user.userId
-    });
-
-    await event.save();
-    await event.populate('author', 'name');
-
-    res.status(201).json(event);
-  } catch (error) {
-    console.error('Create event error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.delete('/api/events/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ error: 'Event not found' });
-    }
-
-    // וידוא שרק המחבר או מנהל יכולים למחוק
-    if (req.user.role !== 'admin' && event.author.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'You can only delete your own events' });
-    }
-
-    await Event.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Event deleted successfully' });
-  } catch (error) {
-    console.error('Delete event error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// מדיה
-app.get('/api/media', async (req, res) => {
-  try {
-    const media = await Media.find()
-      .populate('author', 'name')
-      .sort({ createdAt: -1 });
-    res.json(media);
-  } catch (error) {
-    console.error('Get media error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/media', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
-
-    const { title, type, url, date } = req.body;
-
-    if (!title || !type || !url || !date) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    if (!['image', 'video'].includes(type)) {
-      return res.status(400).json({ error: 'Type must be image or video' });
-    }
-
-    const media = new Media({
-      title,
-      type,
-      url,
-      date,
-      author: req.user.userId
-    });
-
-    await media.save();
-    await media.populate('author', 'name');
-
-    res.status(201).json(media);
-  } catch (error) {
-    console.error('Create media error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.delete('/api/media/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const media = await Media.findById(req.params.id);
-    if (!media) {
-      return res.status(404).json({ error: 'Media not found' });
-    }
-
-    await Media.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Media deleted successfully' });
-  } catch (error) {
-    console.error('Delete media error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
 // Route בסיסי - הגשת קובץ ה-HTML
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/index.html'));
+  console.log('📄 Serving index.html');
+  res.sendFile(path.join(__dirname, 'client', 'index.html'));
 });
 
 // Serve all other routes to index.html for client-side routing
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../client/index.html'));
-});
-
-// טיפול בשגיאות 404 עבור API routes
-app.use('/api/*', (req, res) => {
-  res.status(404).json({ error: 'API route not found' });
-});
-
-// טיפול בשגיאות כלליות
-app.use((error, req, res, next) => {
-  console.error('Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
+  res.sendFile(path.join(__dirname, 'client', 'index.html'));
 });
 
 // האזנה לשרת
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📁 MongoDB: ${MONGODB_URI ? 'Connected' : 'Not connected'}`);
-  console.log(`🔐 JWT Secret: ${JWT_SECRET ? 'Set' : 'Not set'}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📊 API Health: http://localhost:${PORT}/api/health`);
+  console.log(`📁 MongoDB: Connected`);
+  console.log(`🔐 JWT Secret: Set`);
+  console.log(`🌐 Environment: production`);
+  console.log(`🏠 Home: https://fa-v8kd.onrender.com`);
+  console.log(`💊 Health: https://fa-v8kd.onrender.com/api/health`);
 });
