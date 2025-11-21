@@ -361,6 +361,27 @@ app.get('/api/validate-token', authenticateToken, async (req, res) => {
   }
 });
 
+// Change password route
+app.post('/api/change-password', authenticateToken, async (req, res) => {
+  try {
+    console.log('🔑 Change password request for:', req.user.email);
+    const { newPassword } = req.body;
+
+    if (!newPassword) {
+      return res.status(400).json({ error: 'New password is required' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await User.findByIdAndUpdate(req.user.userId, { password: hashedPassword });
+
+    console.log('✅ Password changed successfully for:', req.user.email);
+    res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    console.error('❌ Change password error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Users routes
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
@@ -602,6 +623,110 @@ app.post('/api/assignments', authenticateToken, async (req, res) => {
     res.json(assignment);
   } catch (error) {
     console.error('❌ Create assignment error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 🔥 FIX: Add missing assignment endpoints
+app.post('/api/assignments/submit', authenticateToken, async (req, res) => {
+  try {
+    console.log('📝 Assignment submission by:', req.user.email);
+    const { assignmentId, submission } = req.body;
+
+    if (!assignmentId || !submission) {
+      return res.status(400).json({ error: 'Assignment ID and submission are required' });
+    }
+
+    const assignment = await Assignment.findById(assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+
+    // Check if student already submitted
+    const existingSubmission = assignment.submissions.find(
+      sub => sub.student.toString() === req.user.userId
+    );
+
+    if (existingSubmission) {
+      // Update existing submission
+      existingSubmission.submission = submission;
+      existingSubmission.submittedAt = new Date();
+    } else {
+      // Add new submission
+      assignment.submissions.push({
+        student: req.user.userId,
+        submission,
+        submittedAt: new Date()
+      });
+    }
+
+    await assignment.save();
+    console.log('✅ Assignment submitted successfully');
+    res.json({ message: 'Assignment submitted successfully' });
+  } catch (error) {
+    console.error('❌ Assignment submission error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/assignments/:id/submissions', authenticateToken, async (req, res) => {
+  try {
+    console.log('📋 Assignment submissions requested by:', req.user.email);
+    const assignment = await Assignment.findById(req.params.id)
+      .populate('submissions.student', 'name email')
+      .populate('class', 'name');
+
+    if (!assignment) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+
+    // Only teacher or admin can view submissions
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    console.log('✅ Submissions sent, count:', assignment.submissions.length);
+    res.json(assignment.submissions);
+  } catch (error) {
+    console.error('❌ Get submissions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
+  try {
+    console.log('🎓 Grade assignment by:', req.user.email);
+    const { assignmentId, studentId, grade } = req.body;
+
+    if (!assignmentId || !studentId) {
+      return res.status(400).json({ error: 'Assignment ID and student ID are required' });
+    }
+
+    const assignment = await Assignment.findById(assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ error: 'Assignment not found' });
+    }
+
+    // Only teacher or admin can grade
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const submission = assignment.submissions.find(
+      sub => sub.student.toString() === studentId
+    );
+
+    if (!submission) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+
+    submission.grade = grade;
+    await assignment.save();
+
+    console.log('✅ Grade updated successfully');
+    res.json({ message: 'Grade updated successfully' });
+  } catch (error) {
+    console.error('❌ Grade assignment error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
