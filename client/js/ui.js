@@ -91,8 +91,7 @@ class UIManager {
     }
 
     async loadHomePage() {
-        const announcements = await dbManager.getAnnouncements();
-        this.renderAnnouncements(announcements, 'announcements-list');
+        // No announcements on home page
     }
 
     async loadAnnouncementsPage() {
@@ -189,7 +188,7 @@ class UIManager {
                 <div class="announcement-content">${announcement.content}</div>
                 <div class="announcement-meta">
                     <span class="badge ${announcement.isGlobal ? 'badge-primary' : 'badge-secondary'}">
-                        ${announcement.isGlobal ? 'הודעה ראשית' : 'הודעה לכיתה'}
+                        ${announcement.isGlobal ? 'הודעה כללית' : 'הודעה לכיתה'}
                     </span>
                     <span style="margin-right: 10px; color: var(--gray); font-size: 0.9rem;">
                         ${announcement.author?.name || 'מערכת'}
@@ -374,7 +373,7 @@ class UIManager {
                     <p><strong>מספר כיתות:</strong> ${user.classes?.length || 0}</p>
                     <div style="margin-top: 1rem;">
                         <button class="btn btn-warning" onclick="uiManager.editUser('${user._id}')">עריכה</button>
-                        ${user.role !== 'admin' ? `
+                        ${user.role !== 'admin' && user.email !== 'yairfrish2@gmail.com' ? `
                             <button class="btn btn-danger" onclick="uiManager.deleteUser('${user._id}')" style="margin-right:0.5rem;">מחיקה</button>
                         ` : ''}
                     </div>
@@ -544,7 +543,7 @@ class UIManager {
             
             this.showSuccess('ההודעה פורסמה בהצלחה');
             this.closeAllModals();
-            this.loadPageData(this.currentPage);
+            this.loadPageData('announcements');
         } catch (error) {
             this.showError('שגיאה בפרסום ההודעה: ' + error.message);
         }
@@ -971,13 +970,145 @@ class UIManager {
     }
 
     async editUser(userId) {
-        // Implementation for editing user
-        this.showSuccess('פונקציונליות עריכת משתמש תיושם בגרסה הבאה');
+        try {
+            // קבל את פרטי המשתמש
+            const users = await dbManager.getUsers();
+            const user = users.find(u => u._id === userId);
+            
+            if (!user) {
+                this.showError('משתמש לא נמצא');
+                return;
+            }
+
+            // אל תאפשר עריכה של המנהל הראשי
+            if (user.email === 'yairfrish2@gmail.com') {
+                this.showError('לא ניתן לערוך את מנהל המערכת הראשי');
+                return;
+            }
+
+            // פתח מודל עריכה
+            const modal = document.getElementById('edit-user-modal');
+            modal.style.display = 'flex';
+
+            // מלא את הטופס עם נתוני המשתמש
+            document.getElementById('edit-user-name').value = user.name;
+            document.getElementById('edit-user-email').value = user.email;
+            document.getElementById('edit-user-role').value = user.role;
+            document.getElementById('edit-user-password').value = '';
+
+            // הגדר את ה-submit handler
+            document.getElementById('edit-user-form').onsubmit = async (e) => {
+                e.preventDefault();
+                
+                const name = document.getElementById('edit-user-name').value;
+                const email = document.getElementById('edit-user-email').value;
+                const role = document.getElementById('edit-user-role').value;
+                const password = document.getElementById('edit-user-password').value;
+
+                try {
+                    // עדכן את המשתמש
+                    const response = await fetch(`/api/users/${userId}`, {
+                        method: 'PUT',
+                        headers: authManager.getAuthHeaders(),
+                        body: JSON.stringify({
+                            name,
+                            email,
+                            role,
+                            password: password || undefined
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showSuccess('המשתמש עודכן בהצלחה');
+                        this.closeAllModals();
+                        this.loadPageData('admin');
+                    } else {
+                        const error = await response.json();
+                        this.showError('שגיאה בעדכון המשתמש: ' + error.error);
+                    }
+                } catch (error) {
+                    this.showError('שגיאה בעדכון המשתמש: ' + error.message);
+                }
+            };
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי המשתמש: ' + error.message);
+        }
     }
 
     async editClass(classId) {
-        // Implementation for editing class
-        this.showSuccess('פונקציונליות עריכת כיתה תיושם בגרסה הבאה');
+        try {
+            // קבל את פרטי הכיתה
+            const classes = await dbManager.getClasses();
+            const classItem = classes.find(c => c._id === classId);
+            
+            if (!classItem) {
+                this.showError('כיתה לא נמצאה');
+                return;
+            }
+
+            // פתח מודל עריכה
+            const modal = document.getElementById('edit-class-modal');
+            modal.style.display = 'flex';
+
+            // מלא את הטופס עם נתוני הכיתה
+            document.getElementById('edit-class-name').value = classItem.name;
+
+            // טען מורים ותלמידים
+            const teachers = await dbManager.getTeachers();
+            const students = await dbManager.getUsers();
+            
+            // מלא את רשימת המורים
+            const teachersSelect = document.getElementById('edit-class-teachers');
+            teachersSelect.innerHTML = teachers
+                .filter(t => t._id !== authManager.currentUser.id)
+                .map(t => `<option value="${t._id}" ${classItem.teachers?.includes(t._id) ? 'selected' : ''}>${t.name} (${t.email})</option>`)
+                .join('');
+
+            // מלא את רשימת התלמידים
+            const studentsSelect = document.getElementById('edit-class-students');
+            studentsSelect.innerHTML = students
+                .filter(s => s.role === 'student')
+                .map(s => `<option value="${s._id}" ${classItem.students?.includes(s._id) ? 'selected' : ''}>${s.name} (${s.email})</option>`)
+                .join('');
+
+            // הגדר את ה-submit handler
+            document.getElementById('edit-class-form').onsubmit = async (e) => {
+                e.preventDefault();
+                
+                const name = document.getElementById('edit-class-name').value;
+                const teachersSelect = document.getElementById('edit-class-teachers');
+                const studentsSelect = document.getElementById('edit-class-students');
+                
+                const selectedTeachers = Array.from(teachersSelect.selectedOptions).map(option => option.value);
+                const selectedStudents = Array.from(studentsSelect.selectedOptions).map(option => option.value);
+
+                try {
+                    // עדכן את הכיתה
+                    const response = await fetch(`/api/classes/${classId}`, {
+                        method: 'PUT',
+                        headers: authManager.getAuthHeaders(),
+                        body: JSON.stringify({
+                            name,
+                            teachers: selectedTeachers,
+                            students: selectedStudents
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showSuccess('הכיתה עודכנה בהצלחה');
+                        this.closeAllModals();
+                        this.loadPageData('admin');
+                    } else {
+                        const error = await response.json();
+                        this.showError('שגיאה בעדכון הכיתה: ' + error.error);
+                    }
+                } catch (error) {
+                    this.showError('שגיאה בעדכון הכיתה: ' + error.message);
+                }
+            };
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי הכיתה: ' + error.message);
+        }
     }
 
     async manageClass(classId) {
