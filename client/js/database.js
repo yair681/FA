@@ -1,7 +1,7 @@
 // Database Manager for MongoDB backend
 class DatabaseManager {
     constructor() {
-        this.API_BASE = '/api';
+        this.API_BASE = window.location.origin + '/api';
     }
 
     async makeRequest(endpoint, options = {}) {
@@ -17,11 +17,20 @@ class DatabaseManager {
                 headers
             };
 
+            console.log(`🔄 API Call: ${this.API_BASE}${endpoint}`);
             const response = await fetch(`${this.API_BASE}${endpoint}`, config);
             
             if (response.status === 401) {
                 authManager.logout();
                 throw new Error('Authentication required');
+            }
+
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('Non-JSON response:', text.substring(0, 100));
+                throw new Error('Server returned HTML instead of JSON');
             }
 
             const data = await response.json();
@@ -49,13 +58,6 @@ class DatabaseManager {
         });
     }
 
-    async updateUser(userId, updates) {
-        return this.makeRequest(`/users/${userId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates)
-        });
-    }
-
     async deleteUser(userId) {
         return this.makeRequest(`/users/${userId}`, {
             method: 'DELETE'
@@ -71,13 +73,6 @@ class DatabaseManager {
         return this.makeRequest('/classes', {
             method: 'POST',
             body: JSON.stringify(classData)
-        });
-    }
-
-    async updateClass(classId, updates) {
-        return this.makeRequest(`/classes/${classId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates)
         });
     }
 
@@ -117,13 +112,6 @@ class DatabaseManager {
         });
     }
 
-    async submitAssignment(assignmentId, submissionData) {
-        return this.makeRequest(`/assignments/${assignmentId}/submit`, {
-            method: 'POST',
-            body: JSON.stringify(submissionData)
-        });
-    }
-
     async deleteAssignment(assignmentId) {
         return this.makeRequest(`/assignments/${assignmentId}`, {
             method: 'DELETE'
@@ -139,12 +127,6 @@ class DatabaseManager {
         return this.makeRequest('/events', {
             method: 'POST',
             body: JSON.stringify(eventData)
-        });
-    }
-
-    async deleteEvent(eventId) {
-        return this.makeRequest(`/events/${eventId}`, {
-            method: 'DELETE'
         });
     }
 
