@@ -21,22 +21,8 @@ class UIManager {
         document.getElementById('login-btn').addEventListener('click', () => this.openLoginModal());
         document.getElementById('logout-btn').addEventListener('click', () => this.logout());
 
-        // Register/Login toggle
-        document.getElementById('show-register')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.closeAllModals();
-            this.openRegisterModal();
-        });
-
-        document.getElementById('show-login')?.addEventListener('click', (e) => {
-            e.preventDefault();
-            this.closeAllModals();
-            this.openLoginModal();
-        });
-
         // Forms
         document.getElementById('login-form').addEventListener('submit', (e) => this.handleLogin(e));
-        document.getElementById('register-form').addEventListener('submit', (e) => this.handleRegister(e));
 
         // Close modals
         document.querySelectorAll('.close-modal').forEach(btn => {
@@ -127,6 +113,7 @@ class UIManager {
     async loadAssignmentsPage() {
         if (!authManager.currentUser) {
             document.getElementById('assignments-list').innerHTML = '<p>יש להתחבר כדי לצפות במשימות</p>';
+            document.getElementById('teacher-assignments-list').innerHTML = '<p>יש להתחבר כדי לצפות במשימות</p>';
             return;
         }
         
@@ -160,10 +147,7 @@ class UIManager {
         const classes = await dbManager.getUserClasses();
         this.renderUserClasses(classes, 'user-classes-list');
 
-        document.getElementById('change-password-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleChangePassword();
-        });
+        document.getElementById('change-password-form').onsubmit = (e) => this.handleChangePassword(e);
     }
 
     async loadAdminPage() {
@@ -233,7 +217,7 @@ class UIManager {
                     <p><strong>מספר מורים:</strong> ${classItem.teachers?.length || 0}</p>
                     ${authManager.isTeacher() ? `
                         <div style="margin-top: 1rem;">
-                            <button class="btn btn-secondary">ניהול כיתה</button>
+                            <button class="btn btn-secondary" onclick="uiManager.manageClass('${classItem._id}')">ניהול כיתה</button>
                         </div>
                     ` : ''}
                 </div>
@@ -259,9 +243,12 @@ class UIManager {
                 <div class="announcement-meta">
                     <span class="badge badge-warning">${assignment.teacher?.name || 'מורה'}</span>
                 </div>
-                <button class="btn" style="margin-top:0.5rem;" onclick="uiManager.submitAssignment('${assignment._id}')">
-                    הגשת משימה
-                </button>
+                <div style="margin-top: 1rem;">
+                    <button class="btn" onclick="uiManager.submitAssignment('${assignment._id}')">הגשת משימה</button>
+                    ${assignment.submissions?.find(s => s.student === authManager.currentUser.id) ? `
+                        <span class="badge badge-secondary" style="margin-right: 10px;">הוגש</span>
+                    ` : ''}
+                </div>
             </div>
         `).join('');
     }
@@ -424,12 +411,6 @@ class UIManager {
     // Modal functions
     openLoginModal() {
         document.getElementById('login-modal').style.display = 'flex';
-        document.getElementById('register-modal').style.display = 'none';
-    }
-
-    openRegisterModal() {
-        document.getElementById('register-modal').style.display = 'flex';
-        document.getElementById('login-modal').style.display = 'none';
     }
 
     closeAllModals() {
@@ -498,11 +479,33 @@ class UIManager {
         const teachers = await dbManager.getTeachers();
         const teachersSelect = document.getElementById('class-teachers');
         teachersSelect.innerHTML = teachers
-            .filter(t => t._id !== authManager.currentUser.id) // Exclude current user
+            .filter(t => t._id !== authManager.currentUser.id)
             .map(t => `<option value="${t._id}">${t.name} (${t.email})</option>`)
             .join('');
         
         document.getElementById('add-class-form').onsubmit = (e) => this.handleAddClass(e);
+    }
+
+    openAddEventModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
+        const modal = document.getElementById('add-event-modal');
+        modal.style.display = 'flex';
+        document.getElementById('add-event-form').onsubmit = (e) => this.handleAddEvent(e);
+    }
+
+    openAddMediaModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
+        const modal = document.getElementById('add-media-modal');
+        modal.style.display = 'flex';
+        document.getElementById('add-media-form').onsubmit = (e) => this.handleAddMedia(e);
     }
 
     // Handler functions
@@ -520,30 +523,6 @@ class UIManager {
             this.showPage('home');
         } else {
             this.showError(result.error, 'login-error');
-        }
-    }
-
-    async handleRegister(e) {
-        e.preventDefault();
-        
-        const name = document.getElementById('register-name').value;
-        const email = document.getElementById('register-email').value;
-        const password = document.getElementById('register-password').value;
-        const role = document.getElementById('register-role').value;
-        
-        const result = await authManager.register({
-            name,
-            email,
-            password,
-            role
-        });
-        
-        if (result.success) {
-            this.closeAllModals();
-            this.showError('', 'register-error');
-            this.showPage('home');
-        } else {
-            this.showError(result.error, 'register-error');
         }
     }
 
@@ -640,17 +619,108 @@ class UIManager {
         }
     }
 
+    async handleAddEvent(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('event-title').value;
+        const description = document.getElementById('event-description').value;
+        const date = document.getElementById('event-date').value;
+        
+        try {
+            await dbManager.createEvent({
+                title,
+                description,
+                date
+            });
+            
+            this.showSuccess('האירוע נוסף בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('events');
+        } catch (error) {
+            this.showError('שגיאה בהוספת האירוע: ' + error.message);
+        }
+    }
+
+    async handleAddMedia(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('media-title').value;
+        const type = document.getElementById('media-type').value;
+        const url = document.getElementById('media-url').value;
+        const date = document.getElementById('media-date').value;
+        
+        try {
+            await dbManager.createMedia({
+                title,
+                type,
+                url,
+                date
+            });
+            
+            this.showSuccess('המדיה נוספה בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('history');
+        } catch (error) {
+            this.showError('שגיאה בהוספת המדיה: ' + error.message);
+        }
+    }
+
+    async handleChangePassword(e) {
+        e.preventDefault();
+        
+        const currentPassword = document.getElementById('current-password').value;
+        const newPassword = document.getElementById('new-password').value;
+        const confirmPassword = document.getElementById('confirm-password').value;
+        
+        if (newPassword !== confirmPassword) {
+            this.showError('הסיסמאות אינן תואמות');
+            return;
+        }
+        
+        try {
+            // Verify current password
+            const verifyResponse = await fetch('/api/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: authManager.currentUser.email,
+                    password: currentPassword
+                })
+            });
+            
+            if (!verifyResponse.ok) {
+                this.showError('סיסמה נוכחית לא נכונה');
+                return;
+            }
+            
+            // Update password
+            const response = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    newPassword: newPassword
+                })
+            });
+            
+            if (response.ok) {
+                this.showSuccess('סיסמה שונתה בהצלחה');
+                document.getElementById('change-password-form').reset();
+            } else {
+                this.showError('שגיאה בשינוי הסיסמה');
+            }
+        } catch (error) {
+            this.showError('שגיאה בשינוי הסיסמה: ' + error.message);
+        }
+    }
+
     async logout() {
         await authManager.logout();
         this.showPage('home');
         
         document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
         document.querySelector('.nav-link[data-page="home"]').classList.add('active');
-    }
-
-    async handleChangePassword() {
-        // Implementation for password change
-        this.showSuccess('פונקציונליות שינוי סיסמה תיושם בגרסה הבאה');
     }
 
     // Utility functions
@@ -684,12 +754,55 @@ class UIManager {
             element.textContent = message;
             element.style.display = message ? 'block' : 'none';
         } else {
-            alert(message);
+            // Use a nicer notification system instead of alert
+            this.showNotification(message, 'error');
         }
     }
 
     showSuccess(message) {
-        alert(message);
+        this.showNotification(message, 'success');
+    }
+
+    showNotification(message, type = 'info') {
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.innerHTML = `
+            <div class="notification-content">
+                <span>${message}</span>
+                <button class="notification-close">&times;</button>
+            </div>
+        `;
+        
+        // Add styles
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : '#3498db'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 10000;
+            min-width: 300px;
+            text-align: center;
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto remove after 5 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 5000);
+        
+        // Close on click
+        notification.querySelector('.notification-close').onclick = () => {
+            notification.parentNode.removeChild(notification);
+        };
     }
 
     // Action methods
@@ -698,6 +811,7 @@ class UIManager {
             try {
                 await dbManager.deleteAnnouncement(announcementId);
                 this.loadPageData(this.currentPage);
+                this.showSuccess('ההודעה נמחקה בהצלחה');
             } catch (error) {
                 this.showError('שגיאה במחיקת ההודעה: ' + error.message);
             }
@@ -709,6 +823,7 @@ class UIManager {
             try {
                 await dbManager.deleteUser(userId);
                 this.loadPageData('admin');
+                this.showSuccess('המשתמש נמחק בהצלחה');
             } catch (error) {
                 this.showError('שגיאה במחיקת המשתמש: ' + error.message);
             }
@@ -720,6 +835,7 @@ class UIManager {
             try {
                 await dbManager.deleteClass(classId);
                 this.loadPageData('admin');
+                this.showSuccess('הכיתה נמחקה בהצלחה');
             } catch (error) {
                 this.showError('שגיאה במחיקת הכיתה: ' + error.message);
             }
@@ -731,38 +847,142 @@ class UIManager {
             try {
                 await dbManager.deleteMedia(mediaId);
                 this.loadPageData('history');
+                this.showSuccess('הפריט נמחק בהצלחה');
             } catch (error) {
                 this.showError('שגיאה במחיקת הפריט: ' + error.message);
             }
         }
     }
 
-    submitAssignment(assignmentId) {
-        this.showSuccess('פונקציונליות הגשת משימה תיושם בגרסה הבאה');
+    async deleteAssignment(assignmentId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק משימה זו?')) {
+            try {
+                await dbManager.deleteAssignment(assignmentId);
+                this.loadPageData('assignments');
+                this.showSuccess('המשימה נמחקה בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת המשימה: ' + error.message);
+            }
+        }
     }
 
-    viewSubmissions(assignmentId) {
-        this.showSuccess('פונקציונליות צפייה בהגשות תיושם בגרסה הבאה');
+    async submitAssignment(assignmentId) {
+        const submission = prompt('הזן את ההגשה שלך:');
+        if (submission) {
+            try {
+                const response = await fetch('/api/assignments/submit', {
+                    method: 'POST',
+                    headers: authManager.getAuthHeaders(),
+                    body: JSON.stringify({
+                        assignmentId: assignmentId,
+                        submission: submission
+                    })
+                });
+                
+                if (response.ok) {
+                    this.showSuccess('המשימה הוגשה בהצלחה');
+                    this.loadPageData('assignments');
+                } else {
+                    this.showError('שגיאה בהגשת המשימה');
+                }
+            } catch (error) {
+                this.showError('שגיאה בהגשת המשימה: ' + error.message);
+            }
+        }
     }
 
-    deleteAssignment(assignmentId) {
-        this.showSuccess('פונקציונליות מחיקת משימה תיושם בגרסה הבאה');
+    async viewSubmissions(assignmentId) {
+        try {
+            const response = await fetch(`/api/assignments/${assignmentId}/submissions`, {
+                headers: authManager.getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const submissions = await response.json();
+                this.showSubmissionsModal(submissions, assignmentId);
+            } else {
+                this.showError('שגיאה בטעינת ההגשות');
+            }
+        } catch (error) {
+            this.showError('שגיאה בטעינת ההגשות: ' + error.message);
+        }
     }
 
-    editUser(userId) {
+    showSubmissionsModal(submissions, assignmentId) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>הגשות למשימה</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="submissions-list">
+                    ${submissions.length === 0 ? '<p>אין הגשות</p>' : ''}
+                    ${submissions.map(sub => `
+                        <div class="submission-item">
+                            <h4>${sub.student?.name || 'תלמיד'}</h4>
+                            <p>${sub.submission}</p>
+                            <small>הוגש: ${this.formatDate(sub.submittedAt)}</small>
+                            <div class="submission-actions">
+                                <input type="text" placeholder="ציון" value="${sub.grade || ''}" 
+                                       onchange="uiManager.gradeSubmission('${assignmentId}', '${sub.student?._id}', this.value)">
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.querySelector('.close-modal').onclick = () => {
+            document.body.removeChild(modal);
+        };
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        };
+    }
+
+    async gradeSubmission(assignmentId, studentId, grade) {
+        try {
+            const response = await fetch('/api/assignments/grade', {
+                method: 'POST',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    assignmentId: assignmentId,
+                    studentId: studentId,
+                    grade: grade
+                })
+            });
+            
+            if (response.ok) {
+                this.showSuccess('ציון עודכן בהצלחה');
+            } else {
+                this.showError('שגיאה בעדכון הציון');
+            }
+        } catch (error) {
+            this.showError('שגיאה בעדכון הציון: ' + error.message);
+        }
+    }
+
+    async editUser(userId) {
+        // Implementation for editing user
         this.showSuccess('פונקציונליות עריכת משתמש תיושם בגרסה הבאה');
     }
 
-    editClass(classId) {
+    async editClass(classId) {
+        // Implementation for editing class
         this.showSuccess('פונקציונליות עריכת כיתה תיושם בגרסה הבאה');
     }
 
-    openAddEventModal() {
-        this.showSuccess('פונקציונליות הוספת אירוע תיושם בגרסה הבאה');
-    }
-
-    openAddMediaModal() {
-        this.showSuccess('פונקציונליות הוספת מדיה תיושם בגרסה הבאה');
+    async manageClass(classId) {
+        // Implementation for class management
+        this.showSuccess('פונקציונליות ניהול כיתה תיושם בגרסה הבאה');
     }
 }
 
