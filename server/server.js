@@ -396,6 +396,31 @@ app.post('/api/users', authenticateToken, async (req, res) => {
   }
 });
 
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+  try {
+    console.log('👤 Update user request by:', req.user.email);
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { name, email, role, password } = req.body;
+    const updateData = { name, email, role };
+
+    // אם סיסמה סופקה, הצפן אותה
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updateData.password = hashedPassword;
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true }).select('-password');
+    console.log('✅ User updated:', email);
+    res.json({ message: 'User updated', user });
+  } catch (error) {
+    console.error('❌ Update user error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.delete('/api/users/:id', authenticateToken, async (req, res) => {
   try {
     console.log('🗑️ Delete user request by:', req.user.email);
@@ -445,6 +470,28 @@ app.post('/api/classes', authenticateToken, async (req, res) => {
     res.json(newClass);
   } catch (error) {
     console.error('❌ Create class error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/classes/:id', authenticateToken, async (req, res) => {
+  try {
+    console.log('🏫 Update class request by:', req.user.email);
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { name, teachers, students } = req.body;
+    const updatedClass = await Class.findByIdAndUpdate(
+      req.params.id, 
+      { name, teachers, students }, 
+      { new: true }
+    ).populate('teachers', 'name email').populate('students', 'name email');
+    
+    console.log('✅ Class updated:', name);
+    res.json(updatedClass);
+  } catch (error) {
+    console.error('❌ Update class error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
