@@ -104,16 +104,20 @@
             <div id="assignments-page" class="page" style="display:none;">
                 <h2 class="page-title">משימות</h2>
                 
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">המשימות שלי</h2>
-                    </div>
-                    
-                    <div id="assignments-list">
-                        <div class="loading">טוען משימות...</div>
+                <!-- Student Assignments Section - Visible only to students -->
+                <div id="student-assignments-section" style="display:none;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">המשימות שלי</h2>
+                        </div>
+                        
+                        <div id="assignments-list">
+                            <div class="loading">טוען משימות...</div>
+                        </div>
                     </div>
                 </div>
                 
+                <!-- Teacher Assignments Section - Visible only to teachers/admins -->
                 <div id="teacher-assignments-section" style="display:none;">
                     <div class="card">
                         <div class="card-header">
