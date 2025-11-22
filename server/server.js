@@ -6,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
+import fs from 'fs';
 
 // Fix for __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +27,70 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
 app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
+});
+
+const fileFilter = (req, file, cb) => {
+    // Check file types
+    if (file.fieldname === 'file') {
+        // Assignment files
+        const allowedTypes = [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'image/jpeg',
+            'image/jpg',
+            'image/png'
+        ];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('File type not allowed'), false);
+        }
+    } else if (file.fieldname === 'mediaFile') {
+        // Media files
+        const allowedTypes = [
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/gif',
+            'video/mp4',
+            'video/quicktime',
+            'video/x-msvideo'
+        ];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Media file type not allowed'), false);
+        }
+    } else {
+        cb(null, true);
+    }
+};
+
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: {
+        fileSize: 50 * 1024 * 1024 // 50MB max file size
+    }
+});
 
 // חיבור ל-MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -68,6 +134,8 @@ const assignmentSchema = new mongoose.Schema({
   submissions: [{
     student: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     submission: String,
+    fileUrl: String,
+    fileName: String,
     submittedAt: { type: Date, default: Date.now },
     grade: String
   }],
@@ -86,6 +154,7 @@ const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, enum: ['image', 'video'], required: true },
   url: { type: String, required: true },
+  fileName: String,
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   date: { type: Date, required: true },
   createdAt: { type: Date, default: Date.now }
@@ -532,7 +601,7 @@ app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 FIX: Announcements routes - MAKE GET PUBLIC
+// Announcements routes - MAKE GET PUBLIC
 app.get('/api/announcements', async (req, res) => {
   try {
     console.log('📢 Announcements requested');
@@ -627,14 +696,18 @@ app.post('/api/assignments', authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 FIX: Add missing assignment endpoints
-app.post('/api/assignments/submit', authenticateToken, async (req, res) => {
+// Assignment submission with file upload
+app.post('/api/assignments/submit', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     console.log('📝 Assignment submission by:', req.user.email);
     const { assignmentId, submission } = req.body;
 
-    if (!assignmentId || !submission) {
-      return res.status(400).json({ error: 'Assignment ID and submission are required' });
+    if (!assignmentId) {
+      return res.status(400).json({ error: 'Assignment ID is required' });
+    }
+
+    if (!submission && !req.file) {
+      return res.status(400).json({ error: 'Either submission text or file is required' });
     }
 
     const assignment = await Assignment.findById(assignmentId);
@@ -643,19 +716,31 @@ app.post('/api/assignments/submit', authenticateToken, async (req, res) => {
     }
 
     // Check if student already submitted
-    const existingSubmission = assignment.submissions.find(
+    const existingSubmissionIndex = assignment.submissions.findIndex(
       sub => sub.student.toString() === req.user.userId
     );
 
-    if (existingSubmission) {
+    let fileUrl = '';
+    let fileName = '';
+
+    if (req.file) {
+      fileUrl = `/uploads/${req.file.filename}`;
+      fileName = req.file.originalname;
+    }
+
+    if (existingSubmissionIndex !== -1) {
       // Update existing submission
-      existingSubmission.submission = submission;
-      existingSubmission.submittedAt = new Date();
+      assignment.submissions[existingSubmissionIndex].submission = submission || '';
+      assignment.submissions[existingSubmissionIndex].fileUrl = fileUrl;
+      assignment.submissions[existingSubmissionIndex].fileName = fileName;
+      assignment.submissions[existingSubmissionIndex].submittedAt = new Date();
     } else {
       // Add new submission
       assignment.submissions.push({
         student: req.user.userId,
-        submission,
+        submission: submission || '',
+        fileUrl: fileUrl,
+        fileName: fileName,
         submittedAt: new Date()
       });
     }
@@ -793,14 +878,31 @@ app.get('/api/media', async (req, res) => {
   }
 });
 
-app.post('/api/media', authenticateToken, async (req, res) => {
+// Media upload with file
+app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     console.log('🖼️ Create media by:', req.user.email);
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Teacher or admin access required' });
     }
-    const { title, type, url, date } = req.body;
-    const media = new Media({ title, type, url, date, author: req.user.userId });
+
+    const { title, type, date } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'File is required' });
+    }
+
+    const fileUrl = `/uploads/${req.file.filename}`;
+
+    const media = new Media({
+      title,
+      type,
+      url: fileUrl,
+      fileName: req.file.originalname,
+      date,
+      author: req.user.userId
+    });
+
     await media.save();
     console.log('✅ Media created:', title);
     res.json(media);
@@ -816,6 +918,16 @@ app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Admin access required' });
     }
+
+    const media = await Media.findById(req.params.id);
+    if (media && media.url) {
+      // Delete the file from uploads directory
+      const filePath = path.join(__dirname, 'uploads', path.basename(media.url));
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
     await Media.findByIdAndDelete(req.params.id);
     console.log('✅ Media deleted:', req.params.id);
     res.json({ message: 'Media deleted' });
