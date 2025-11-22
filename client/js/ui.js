@@ -261,30 +261,51 @@ class UIManager {
     }
 
     async loadAssignmentsPage() {
+        console.log('📚 Loading assignments page for user:', authManager.currentUser?.email);
+        
         if (!authManager.currentUser) {
             // Show guest message - no assignments data needed
+            console.log('👤 User not logged in, showing guest message');
             document.getElementById('guest-assignments-section').style.display = 'block';
             document.getElementById('student-assignments-section').style.display = 'none';
             document.getElementById('teacher-assignments-section').style.display = 'none';
             return;
         }
         
-        const assignments = await dbManager.getAssignments();
-        
-        // Show student assignments only to students
-        if (authManager.isStudent()) {
-            document.getElementById('student-assignments-section').style.display = 'block';
-            document.getElementById('teacher-assignments-section').style.display = 'none';
-            document.getElementById('guest-assignments-section').style.display = 'none';
-            this.renderAssignments(assignments, 'assignments-list');
-        }
+        try {
+            console.log('🔄 Fetching assignments data...');
+            const assignments = await dbManager.getAssignments();
+            console.log('✅ Assignments data received:', assignments);
+            
+            // Show student assignments only to students
+            if (authManager.isStudent()) {
+                console.log('🎒 Showing student assignments section');
+                document.getElementById('student-assignments-section').style.display = 'block';
+                document.getElementById('teacher-assignments-section').style.display = 'none';
+                document.getElementById('guest-assignments-section').style.display = 'none';
+                this.renderAssignments(assignments, 'assignments-list');
+            }
 
-        // Show teacher assignments only to teachers/admins
-        if (authManager.isTeacher()) {
-            document.getElementById('teacher-assignments-section').style.display = 'block';
-            document.getElementById('student-assignments-section').style.display = 'none';
-            document.getElementById('guest-assignments-section').style.display = 'none';
-            this.renderTeacherAssignments(assignments, 'teacher-assignments-list');
+            // Show teacher assignments only to teachers/admins
+            if (authManager.isTeacher()) {
+                console.log('👨‍🏫 Showing teacher assignments section');
+                document.getElementById('teacher-assignments-section').style.display = 'block';
+                document.getElementById('student-assignments-section').style.display = 'none';
+                document.getElementById('guest-assignments-section').style.display = 'none';
+                this.renderTeacherAssignments(assignments, 'teacher-assignments-list');
+            }
+        } catch (error) {
+            console.error('❌ Error loading assignments page:', error);
+            this.showError('שגיאה בטעינת המשימות');
+            
+            // Show appropriate section even on error
+            if (authManager.isStudent()) {
+                document.getElementById('student-assignments-section').style.display = 'block';
+                document.getElementById('assignments-list').innerHTML = '<p>שגיאה בטעינת המשימות. נסה שוב מאוחר יותר.</p>';
+            } else if (authManager.isTeacher()) {
+                document.getElementById('teacher-assignments-section').style.display = 'block';
+                document.getElementById('teacher-assignments-list').innerHTML = '<p>שגיאה בטעינת המשימות. נסה שוב מאוחר יותר.</p>';
+            }
         }
     }
 
@@ -398,12 +419,20 @@ class UIManager {
     renderAssignments(assignments, containerId) {
         const container = document.getElementById(containerId);
         
+        console.log('🎨 Rendering assignments for student, count:', assignments?.length || 0);
+        
         if (!assignments || assignments.length === 0) {
-            container.innerHTML = '<p>אין משימות להצגה</p>';
+            container.innerHTML = '<p>אין משימות להצגה כרגע</p>';
             return;
         }
 
         container.innerHTML = assignments.map(assignment => {
+            // Check if assignment exists and has required properties
+            if (!assignment || !assignment._id) {
+                console.warn('⚠️ Invalid assignment found:', assignment);
+                return '';
+            }
+
             const userSubmission = assignment.submissions?.find(s => s.student === authManager.currentUser.id);
             const isSubmitted = !!userSubmission;
             const isOverdue = new Date(assignment.dueDate) < new Date();
@@ -411,13 +440,13 @@ class UIManager {
             return `
             <div class="announcement">
                 <div class="announcement-header">
-                    <div class="announcement-title">${assignment.title}</div>
+                    <div class="announcement-title">${assignment.title || 'ללא כותרת'}</div>
                     <div class="announcement-date">
                         תאריך הגשה: ${this.formatDate(assignment.dueDate)}
                         ${isOverdue ? '<span class="badge badge-danger" style="margin-right:10px;">איחור</span>' : ''}
                     </div>
                 </div>
-                <div class="announcement-content">${assignment.description}</div>
+                <div class="announcement-content">${assignment.description || 'ללא תיאור'}</div>
                 <div class="announcement-meta">
                     <span class="badge badge-warning">${assignment.teacher?.name || 'מורה'}</span>
                     <span class="badge ${isSubmitted ? 'badge-secondary' : 'badge-primary'}">
