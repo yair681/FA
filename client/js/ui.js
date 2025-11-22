@@ -269,10 +269,12 @@ class UIManager {
         
         const assignments = await dbManager.getAssignments();
         
+        // Show student assignments only to students
         if (authManager.isStudent()) {
             this.renderAssignments(assignments, 'assignments-list');
         }
 
+        // Show teacher assignments only to teachers/admins
         if (authManager.isTeacher()) {
             this.renderTeacherAssignments(assignments, 'teacher-assignments-list');
         }
