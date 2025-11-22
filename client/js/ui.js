@@ -2,6 +2,8 @@
 class UIManager {
     constructor() {
         this.currentPage = 'home';
+        this.currentAssignmentId = null;
+        this.currentFile = null;
         this.initEventListeners();
     }
 
@@ -44,6 +46,155 @@ class UIManager {
             const classGroup = document.getElementById('class-selection-group');
             classGroup.style.display = e.target.value === 'class' ? 'block' : 'none';
         });
+
+        // File upload handlers
+        this.initFileUploadHandlers();
+    }
+
+    initFileUploadHandlers() {
+        // Assignment file upload
+        const fileUploadArea = document.getElementById('file-upload-area');
+        const submissionFile = document.getElementById('submission-file');
+        
+        if (fileUploadArea && submissionFile) {
+            fileUploadArea.addEventListener('click', () => submissionFile.click());
+            
+            fileUploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                fileUploadArea.classList.add('dragover');
+            });
+            
+            fileUploadArea.addEventListener('dragleave', () => {
+                fileUploadArea.classList.remove('dragover');
+            });
+            
+            fileUploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                fileUploadArea.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    this.handleFileSelect(e.dataTransfer.files[0]);
+                }
+            });
+            
+            submissionFile.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    this.handleFileSelect(e.target.files[0]);
+                }
+            });
+        }
+
+        // Media file upload
+        const mediaUploadArea = document.getElementById('media-upload-area');
+        const mediaFile = document.getElementById('media-file');
+        const mediaType = document.getElementById('media-type');
+        
+        if (mediaUploadArea && mediaFile) {
+            mediaUploadArea.addEventListener('click', () => mediaFile.click());
+            
+            mediaType.addEventListener('change', (e) => {
+                const fileTypes = document.getElementById('media-file-types');
+                if (e.target.value === 'image') {
+                    fileTypes.textContent = 'תמונות נתמכות: JPG, PNG, GIF (מקסימום 10MB)';
+                    mediaFile.accept = '.jpg,.jpeg,.png,.gif';
+                } else {
+                    fileTypes.textContent = 'סרטונים נתמכים: MP4, MOV, AVI (מקסימום 50MB)';
+                    mediaFile.accept = '.mp4,.mov,.avi';
+                }
+            });
+            
+            mediaFile.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    this.handleMediaFileSelect(e.target.files[0]);
+                }
+            });
+        }
+
+        // Remove file button
+        document.getElementById('remove-file')?.addEventListener('click', () => {
+            this.removeSelectedFile();
+        });
+    }
+
+    handleFileSelect(file) {
+        // Check file size (10MB max)
+        if (file.size > 10 * 1024 * 1024) {
+            this.showError('גודל הקובץ חייב להיות קטן מ-10MB');
+            return;
+        }
+
+        // Check file type
+        const allowedTypes = ['application/pdf', 'application/msword', 
+                             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                             'image/jpeg', 'image/jpg', 'image/png'];
+        
+        if (!allowedTypes.includes(file.type)) {
+            this.showError('סוג קובץ לא נתמך. אנא העלה קובץ PDF, Word או תמונה');
+            return;
+        }
+
+        this.currentFile = file;
+        
+        // Show file preview
+        const filePreview = document.getElementById('file-preview');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        
+        fileName.textContent = file.name;
+        fileSize.textContent = this.formatFileSize(file.size);
+        filePreview.style.display = 'block';
+        
+        this.showSuccess('קובץ נבחר בהצלחה');
+    }
+
+    handleMediaFileSelect(file) {
+        const mediaType = document.getElementById('media-type').value;
+        const maxSize = mediaType === 'image' ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+        
+        if (file.size > maxSize) {
+            this.showError(`גודל הקובץ חייב להיות קטן מ-${mediaType === 'image' ? '10MB' : '50MB'}`);
+            return;
+        }
+
+        this.currentFile = file;
+        
+        // Show media preview
+        const mediaPreview = document.getElementById('media-preview');
+        mediaPreview.style.display = 'block';
+        
+        if (mediaType === 'image') {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                mediaPreview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
+            };
+            reader.readAsDataURL(file);
+        } else {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                mediaPreview.innerHTML = `
+                    <video controls>
+                        <source src="${e.target.result}" type="video/mp4">
+                        הדפדפן שלך אינו תומך בנגן וידאו.
+                    </video>
+                `;
+            };
+            reader.readAsDataURL(file);
+        }
+        
+        this.showSuccess('קובץ נבחר בהצלחה');
+    }
+
+    removeSelectedFile() {
+        this.currentFile = null;
+        document.getElementById('file-preview').style.display = 'none';
+        document.getElementById('submission-file').value = '';
+    }
+
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     showPage(pageId) {
@@ -91,7 +242,7 @@ class UIManager {
     }
 
     async loadHomePage() {
-        // No announcements on home page
+        // Home page content is static
     }
 
     async loadAnnouncementsPage() {
@@ -214,11 +365,13 @@ class UIManager {
                 <div class="announcement-content">
                     <p><strong>מספר תלמידים:</strong> ${classItem.students?.length || 0}</p>
                     <p><strong>מספר מורים:</strong> ${classItem.teachers?.length || 0}</p>
-                    ${authManager.isTeacher() ? `
-                        <div style="margin-top: 1rem;">
+                    <div class="class-management-actions">
+                        ${authManager.isTeacher() ? `
                             <button class="btn btn-secondary" onclick="uiManager.manageClass('${classItem._id}')">ניהול כיתה</button>
-                        </div>
-                    ` : ''}
+                            <button class="btn" onclick="uiManager.viewClassStudents('${classItem._id}')">צפייה בתלמידים</button>
+                            <button class="btn btn-warning" onclick="uiManager.editClass('${classItem._id}')">עריכת כיתה</button>
+                        ` : ''}
+                    </div>
                 </div>
             </div>
         `).join('');
@@ -232,24 +385,40 @@ class UIManager {
             return;
         }
 
-        container.innerHTML = assignments.map(assignment => `
+        container.innerHTML = assignments.map(assignment => {
+            const userSubmission = assignment.submissions?.find(s => s.student === authManager.currentUser.id);
+            const isSubmitted = !!userSubmission;
+            const isOverdue = new Date(assignment.dueDate) < new Date();
+            
+            return `
             <div class="announcement">
                 <div class="announcement-header">
                     <div class="announcement-title">${assignment.title}</div>
-                    <div class="announcement-date">תאריך הגשה: ${this.formatDate(assignment.dueDate)}</div>
+                    <div class="announcement-date">
+                        תאריך הגשה: ${this.formatDate(assignment.dueDate)}
+                        ${isOverdue ? '<span class="badge badge-danger" style="margin-right:10px;">איחור</span>' : ''}
+                    </div>
                 </div>
                 <div class="announcement-content">${assignment.description}</div>
                 <div class="announcement-meta">
                     <span class="badge badge-warning">${assignment.teacher?.name || 'מורה'}</span>
+                    <span class="badge ${isSubmitted ? 'badge-secondary' : 'badge-primary'}">
+                        ${isSubmitted ? 'הוגש' : 'טרם הוגש'}
+                    </span>
                 </div>
                 <div style="margin-top: 1rem;">
-                    <button class="btn" onclick="uiManager.submitAssignment('${assignment._id}')">הגשת משימה</button>
-                    ${assignment.submissions?.find(s => s.student === authManager.currentUser.id) ? `
-                        <span class="badge badge-secondary" style="margin-right: 10px;">הוגש</span>
+                    <button class="btn" onclick="uiManager.openSubmitAssignmentModal('${assignment._id}')">
+                        ${isSubmitted ? 'עדכון הגשה' : 'הגשת משימה'}
+                    </button>
+                    ${isSubmitted ? `
+                        <span class="badge badge-secondary" style="margin-right: 10px;">
+                            הוגש ב: ${this.formatDate(userSubmission.submittedAt)}
+                            ${userSubmission.grade ? ` | ציון: ${userSubmission.grade}` : ''}
+                        </span>
                     ` : ''}
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     renderTeacherAssignments(assignments, containerId) {
@@ -260,7 +429,11 @@ class UIManager {
             return;
         }
 
-        container.innerHTML = assignments.map(assignment => `
+        container.innerHTML = assignments.map(assignment => {
+            const submissionCount = assignment.submissions?.length || 0;
+            const gradedCount = assignment.submissions?.filter(s => s.grade).length || 0;
+            
+            return `
             <div class="announcement">
                 <div class="announcement-header">
                     <div class="announcement-title">${assignment.title}</div>
@@ -268,14 +441,16 @@ class UIManager {
                 </div>
                 <div class="announcement-content">${assignment.description}</div>
                 <div class="announcement-content">
-                    <strong>מספר הגשות:</strong> ${assignment.submissions?.length || 0}
+                    <strong>מספר הגשות:</strong> ${submissionCount} | 
+                    <strong>מספר ציונים:</strong> ${gradedCount}
                 </div>
                 <div style="margin-top: 1rem;">
                     <button class="btn" onclick="uiManager.viewSubmissions('${assignment._id}')">צפייה בהגשות</button>
+                    <button class="btn btn-warning" onclick="uiManager.editAssignment('${assignment._id}')" style="margin-right:0.5rem;">עריכה</button>
                     <button class="btn btn-danger" onclick="uiManager.deleteAssignment('${assignment._id}')" style="margin-right:0.5rem;">מחיקה</button>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     renderEvents(events, containerId) {
@@ -416,6 +591,11 @@ class UIManager {
         document.querySelectorAll('.modal').forEach(modal => {
             modal.style.display = 'none';
         });
+        this.currentFile = null;
+        document.getElementById('file-preview').style.display = 'none';
+        document.getElementById('media-preview').style.display = 'none';
+        document.getElementById('submission-file').value = '';
+        document.getElementById('media-file').value = '';
     }
 
     async openAddAnnouncementModal() {
@@ -452,6 +632,23 @@ class UIManager {
         classSelect.innerHTML = classes.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
         
         document.getElementById('add-assignment-form').onsubmit = (e) => this.handleAddAssignment(e);
+    }
+
+    openSubmitAssignmentModal(assignmentId) {
+        if (!authManager.isStudent()) {
+            this.showError('גישת תלמיד נדרשת');
+            return;
+        }
+
+        this.currentAssignmentId = assignmentId;
+        const modal = document.getElementById('submit-assignment-modal');
+        modal.style.display = 'flex';
+        
+        // Reset form
+        document.getElementById('submission-text').value = '';
+        this.removeSelectedFile();
+        
+        document.getElementById('submit-assignment-form').onsubmit = (e) => this.handleSubmitAssignment(e);
     }
 
     openAddUserModal() {
@@ -573,6 +770,46 @@ class UIManager {
         }
     }
 
+    async handleSubmitAssignment(e) {
+        e.preventDefault();
+        
+        const submissionText = document.getElementById('submission-text').value;
+        
+        if (!submissionText && !this.currentFile) {
+            this.showError('יש להזין תשובה או להעלות קובץ');
+            return;
+        }
+        
+        try {
+            const formData = new FormData();
+            formData.append('assignmentId', this.currentAssignmentId);
+            formData.append('submission', submissionText);
+            
+            if (this.currentFile) {
+                formData.append('file', this.currentFile);
+            }
+            
+            const response = await fetch('/api/assignments/submit', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${authManager.token}`
+                },
+                body: formData
+            });
+            
+            if (response.ok) {
+                this.showSuccess('המשימה הוגשה בהצלחה');
+                this.closeAllModals();
+                this.loadPageData('assignments');
+            } else {
+                const error = await response.json();
+                this.showError('שגיאה בהגשת המשימה: ' + error.error);
+            }
+        } catch (error) {
+            this.showError('שגיאה בהגשת המשימה: ' + error.message);
+        }
+    }
+
     async handleAddUser(e) {
         e.preventDefault();
         
@@ -645,20 +882,36 @@ class UIManager {
         
         const title = document.getElementById('media-title').value;
         const type = document.getElementById('media-type').value;
-        const url = document.getElementById('media-url').value;
         const date = document.getElementById('media-date').value;
         
+        if (!this.currentFile) {
+            this.showError('יש לבחור קובץ להעלאה');
+            return;
+        }
+        
         try {
-            await dbManager.createMedia({
-                title,
-                type,
-                url,
-                date
+            const formData = new FormData();
+            formData.append('title', title);
+            formData.append('type', type);
+            formData.append('date', date);
+            formData.append('file', this.currentFile);
+            
+            const response = await fetch('/api/media', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${authManager.token}`
+                },
+                body: formData
             });
             
-            this.showSuccess('המדיה נוספה בהצלחה');
-            this.closeAllModals();
-            this.loadPageData('history');
+            if (response.ok) {
+                this.showSuccess('המדיה נוספה בהצלחה');
+                this.closeAllModals();
+                this.loadPageData('history');
+            } else {
+                const error = await response.json();
+                this.showError('שגיאה בהוספת המדיה: ' + error.error);
+            }
         } catch (error) {
             this.showError('שגיאה בהוספת המדיה: ' + error.message);
         }
@@ -722,88 +975,6 @@ class UIManager {
         document.querySelector('.nav-link[data-page="home"]').classList.add('active');
     }
 
-    // Utility functions
-    formatDate(dateString) {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('he-IL');
-    }
-
-    getRoleDisplayName(role) {
-        const roles = {
-            'student': 'תלמיד',
-            'teacher': 'מורה',
-            'admin': 'מנהל מערכת'
-        };
-        return roles[role] || role;
-    }
-
-    getRoleBadgeClass(role) {
-        const classes = {
-            'student': 'badge-secondary',
-            'teacher': 'badge-primary',
-            'admin': 'badge-warning'
-        };
-        return classes[role] || 'badge-secondary';
-    }
-
-    showError(message, elementId = null) {
-        if (elementId) {
-            const element = document.getElementById(elementId);
-            element.textContent = message;
-            element.style.display = message ? 'block' : 'none';
-        } else {
-            // Use a nicer notification system instead of alert
-            this.showNotification(message, 'error');
-        }
-    }
-
-    showSuccess(message) {
-        this.showNotification(message, 'success');
-    }
-
-    showNotification(message, type = 'info') {
-        // Create notification element
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        notification.innerHTML = `
-            <div class="notification-content">
-                <span>${message}</span>
-                <button class="notification-close">&times;</button>
-            </div>
-        `;
-        
-        // Add styles
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : '#3498db'};
-            color: white;
-            padding: 12px 20px;
-            border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            z-index: 10000;
-            min-width: 300px;
-            text-align: center;
-        `;
-        
-        document.body.appendChild(notification);
-        
-        // Auto remove after 5 seconds
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 5000);
-        
-        // Close on click
-        notification.querySelector('.notification-close').onclick = () => {
-            notification.parentNode.removeChild(notification);
-        };
-    }
-
     // Action methods
     async deleteAnnouncement(announcementId) {
         if (confirm('האם אתה בטוח שברצונך למחוק הודעה זו?')) {
@@ -865,31 +1036,6 @@ class UIManager {
         }
     }
 
-    async submitAssignment(assignmentId) {
-        const submission = prompt('הזן את ההגשה שלך:');
-        if (submission) {
-            try {
-                const response = await fetch('/api/assignments/submit', {
-                    method: 'POST',
-                    headers: authManager.getAuthHeaders(),
-                    body: JSON.stringify({
-                        assignmentId: assignmentId,
-                        submission: submission
-                    })
-                });
-                
-                if (response.ok) {
-                    this.showSuccess('המשימה הוגשה בהצלחה');
-                    this.loadPageData('assignments');
-                } else {
-                    this.showError('שגיאה בהגשת המשימה');
-                }
-            } catch (error) {
-                this.showError('שגיאה בהגשת המשימה: ' + error.message);
-            }
-        }
-    }
-
     async viewSubmissions(assignmentId) {
         try {
             const response = await fetch(`/api/assignments/${assignmentId}/submissions`, {
@@ -912,21 +1058,40 @@ class UIManager {
         modal.className = 'modal';
         modal.style.display = 'flex';
         modal.innerHTML = `
-            <div class="modal-content">
+            <div class="modal-content" style="max-width: 800px;">
                 <div class="modal-header">
-                    <h2>הגשות למשימה</h2>
+                    <h2>הגשות תלמידים</h2>
                     <button class="close-modal">&times;</button>
                 </div>
                 <div class="submissions-list">
                     ${submissions.length === 0 ? '<p>אין הגשות</p>' : ''}
                     ${submissions.map(sub => `
                         <div class="submission-item">
-                            <h4>${sub.student?.name || 'תלמיד'}</h4>
-                            <p>${sub.submission}</p>
-                            <small>הוגש: ${this.formatDate(sub.submittedAt)}</small>
-                            <div class="submission-actions">
-                                <input type="text" placeholder="ציון" value="${sub.grade || ''}" 
-                                       onchange="uiManager.gradeSubmission('${assignmentId}', '${sub.student?._id}', this.value)">
+                            <div class="submission-header">
+                                <div class="submission-student">${sub.student?.name || 'תלמיד'}</div>
+                                <div class="submission-date">הוגש: ${this.formatDate(sub.submittedAt)}</div>
+                            </div>
+                            ${sub.submission ? `
+                                <div class="submission-content">
+                                    <strong>תשובה:</strong>
+                                    <p>${sub.submission}</p>
+                                </div>
+                            ` : ''}
+                            ${sub.fileUrl ? `
+                                <div class="submission-content">
+                                    <strong>קובץ:</strong>
+                                    <a href="${sub.fileUrl}" class="submission-file" target="_blank" download>
+                                        <i class="fas fa-download"></i>
+                                        הורד קובץ
+                                    </a>
+                                </div>
+                            ` : ''}
+                            <div class="grade-input">
+                                <label>ציון:</label>
+                                <input type="text" value="${sub.grade || ''}" 
+                                       onchange="uiManager.gradeSubmission('${assignmentId}', '${sub.student?._id}', this.value)"
+                                       placeholder="הזן ציון">
+                                ${sub.grade ? `<span class="badge badge-secondary">ציון סופי</span>` : ''}
                             </div>
                         </div>
                     `).join('')}
@@ -967,6 +1132,129 @@ class UIManager {
         } catch (error) {
             this.showError('שגיאה בעדכון הציון: ' + error.message);
         }
+    }
+
+    async manageClass(classId) {
+        try {
+            const classes = await dbManager.getClasses();
+            const classItem = classes.find(c => c._id === classId);
+            
+            if (!classItem) {
+                this.showError('כיתה לא נמצאה');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 800px;">
+                    <div class="modal-header">
+                        <h2>ניהול כיתה - ${classItem.name}</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="announcement-content">
+                        <h3>מורים בכיתה:</h3>
+                        <ul>
+                            ${classItem.teachers?.map(t => `<li>${t.name} (${t.email})</li>`).join('') || '<li>אין מורים נוספים</li>'}
+                        </ul>
+                        
+                        <h3>תלמידים בכיתה:</h3>
+                        <ul>
+                            ${classItem.students?.map(s => `<li>${s.name} (${s.email})</li>`).join('') || '<li>אין תלמידים</li>'}
+                        </ul>
+                        
+                        <div class="class-management-actions">
+                            <button class="btn btn-warning" onclick="uiManager.editClass('${classId}')">עריכת כיתה</button>
+                            <button class="btn" onclick="uiManager.viewClassAssignments('${classId}')">משימות הכיתה</button>
+                            <button class="btn btn-secondary" onclick="uiManager.viewClassAnnouncements('${classId}')">הודעות הכיתה</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            modal.querySelector('.close-modal').onclick = () => {
+                document.body.removeChild(modal);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            };
+            
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי הכיתה: ' + error.message);
+        }
+    }
+
+    async viewClassStudents(classId) {
+        try {
+            const classes = await dbManager.getClasses();
+            const classItem = classes.find(c => c._id === classId);
+            
+            if (!classItem) {
+                this.showError('כיתה לא נמצאה');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2>תלמידי הכיתה - ${classItem.name}</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="announcement-content">
+                        ${classItem.students?.length > 0 ? `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>שם</th>
+                                        <th>אימייל</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${classItem.students.map(student => `
+                                        <tr>
+                                            <td>${student.name}</td>
+                                            <td>${student.email}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        ` : '<p>אין תלמידים בכיתה זו</p>'}
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            modal.querySelector('.close-modal').onclick = () => {
+                document.body.removeChild(modal);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            };
+            
+        } catch (error) {
+            this.showError('שגיאה בטעינת תלמידי הכיתה: ' + error.message);
+        }
+    }
+
+    async viewClassAssignments(classId) {
+        this.showSuccess('פונקציונליות צפייה במשימות הכיתה תיושם בגרסה הבאה');
+    }
+
+    async viewClassAnnouncements(classId) {
+        this.showSuccess('פונקציונליות צפייה בהודעות הכיתה תיושם בגרסה הבאה');
     }
 
     async editUser(userId) {
@@ -1111,9 +1399,90 @@ class UIManager {
         }
     }
 
-    async manageClass(classId) {
-        // Implementation for class management
-        this.showSuccess('פונקציונליות ניהול כיתה תיושם בגרסה הבאה');
+    async editAssignment(assignmentId) {
+        this.showSuccess('פונקציונליות עריכת משימה תיושם בגרסה הבאה');
+    }
+
+    // Utility functions
+    formatDate(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        return date.toLocaleDateString('he-IL');
+    }
+
+    getRoleDisplayName(role) {
+        const roles = {
+            'student': 'תלמיד',
+            'teacher': 'מורה',
+            'admin': 'מנהל מערכת'
+        };
+        return roles[role] || role;
+    }
+
+    getRoleBadgeClass(role) {
+        const classes = {
+            'student': 'badge-secondary',
+            'teacher': 'badge-primary',
+            'admin': 'badge-warning'
+        };
+        return classes[role] || 'badge-secondary';
+    }
+
+    showError(message, elementId = null) {
+        if (elementId) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.style.display = message ? 'block' : 'none';
+        } else {
+            // Use a nicer notification system instead of alert
+            this.showNotification(message, 'error');
+        }
+    }
+
+    showSuccess(message) {
+        this.showNotification(message, 'success');
+    }
+
+    showNotification(message, type = 'info') {
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.innerHTML = `
+            <div class="notification-content">
+                <span>${message}</span>
+                <button class="notification-close">&times;</button>
+            </div>
+        `;
+        
+        // Add styles
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : '#3498db'};
+            color: white;
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 10000;
+            min-width: 300px;
+            text-align: center;
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto remove after 5 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 5000);
+        
+        // Close on click
+        notification.querySelector('.notification-close').onclick = () => {
+            notification.parentNode.removeChild(notification);
+        };
     }
 }
 
