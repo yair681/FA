@@ -68,6 +68,7 @@ const assignmentSchema = new mongoose.Schema({
   submissions: [{
     student: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     submission: String,
+    fileUrl: String,
     submittedAt: { type: Date, default: Date.now },
     grade: String
   }],
@@ -532,11 +533,48 @@ app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// 🔥 NEW: Class-specific assignments endpoint
+app.get('/api/classes/:id/assignments', authenticateToken, async (req, res) => {
+  try {
+    console.log('📚 Class assignments requested by:', req.user.email);
+    const assignments = await Assignment.find({ class: req.params.id })
+      .populate('class', 'name')
+      .populate('teacher', 'name')
+      .sort({ dueDate: 1 });
+    console.log('✅ Class assignments sent, count:', assignments.length);
+    res.json(assignments);
+  } catch (error) {
+    console.error('❌ Get class assignments error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// 🔥 NEW: Class-specific announcements endpoint
+app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) => {
+  try {
+    console.log('📢 Class announcements requested by:', req.user.email);
+    const announcements = await Announcement.find({ 
+      $or: [
+        { class: req.params.id },
+        { isGlobal: true }
+      ]
+    })
+      .populate('author', 'name')
+      .populate('class', 'name')
+      .sort({ createdAt: -1 });
+    console.log('✅ Class announcements sent, count:', announcements.length);
+    res.json(announcements);
+  } catch (error) {
+    console.error('❌ Get class announcements error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // 🔥 FIX: Announcements routes - MAKE GET PUBLIC
 app.get('/api/announcements', async (req, res) => {
   try {
     console.log('📢 Announcements requested');
-    const announcements = await Announcement.find()
+    const announcements = await Announcement.find({ isGlobal: true })
       .populate('author', 'name')
       .populate('class', 'name')
       .sort({ createdAt: -1 });
@@ -591,10 +629,24 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
 app.get('/api/assignments', authenticateToken, async (req, res) => {
   try {
     console.log('📚 Assignments requested by:', req.user.email);
-    const assignments = await Assignment.find()
-      .populate('class', 'name')
-      .populate('teacher', 'name')
-      .sort({ dueDate: 1 });
+    
+    let assignments;
+    if (req.user.role === 'student') {
+      // For students, only show assignments for their classes
+      const user = await User.findById(req.user.userId).populate('classes');
+      const classIds = user.classes.map(c => c._id);
+      assignments = await Assignment.find({ class: { $in: classIds } })
+        .populate('class', 'name')
+        .populate('teacher', 'name')
+        .sort({ dueDate: 1 });
+    } else {
+      // For teachers/admins, show all assignments
+      assignments = await Assignment.find()
+        .populate('class', 'name')
+        .populate('teacher', 'name')
+        .sort({ dueDate: 1 });
+    }
+    
     console.log('✅ Assignments sent, count:', assignments.length);
     res.json(assignments);
   } catch (error) {
@@ -658,14 +710,14 @@ app.put('/api/assignments/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// 🔥 FIX: Add missing assignment endpoints
+// 🔥 FIXED: Assignment submission endpoint
 app.post('/api/assignments/submit', authenticateToken, async (req, res) => {
   try {
     console.log('📝 Assignment submission by:', req.user.email);
     const { assignmentId, submission } = req.body;
 
-    if (!assignmentId || !submission) {
-      return res.status(400).json({ error: 'Assignment ID and submission are required' });
+    if (!assignmentId) {
+      return res.status(400).json({ error: 'Assignment ID is required' });
     }
 
     const assignment = await Assignment.findById(assignmentId);
@@ -680,13 +732,13 @@ app.post('/api/assignments/submit', authenticateToken, async (req, res) => {
 
     if (existingSubmission) {
       // Update existing submission
-      existingSubmission.submission = submission;
+      existingSubmission.submission = submission || existingSubmission.submission;
       existingSubmission.submittedAt = new Date();
     } else {
       // Add new submission
       assignment.submissions.push({
         student: req.user.userId,
-        submission,
+        submission: submission || '',
         submittedAt: new Date()
       });
     }
