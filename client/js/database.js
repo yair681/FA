@@ -239,10 +239,8 @@ class DatabaseManager {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest('/media', {
-            method: 'POST',
-            body: JSON.stringify(mediaData)
-        });
+        // For file uploads, we'll use FormData directly in the UI manager
+        throw new Error('Use FormData for media creation with files');
     }
 
     async deleteMedia(mediaId) {
