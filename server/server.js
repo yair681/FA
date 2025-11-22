@@ -6,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer'; // חובה: טיפול בקבצים
+import fs from 'fs'; // חובה: ניהול תיקיות
 
 // Fix for __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -21,17 +23,47 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 app.use(cors());
 app.use(express.json());
 
-// ✅ FIXED: Serve static files from the CORRECT path
+// ✅ הגדרת העלאת קבצים (Multer)
+const uploadDir = path.join(__dirname, 'uploads');
+// יצירת התיקייה אם היא לא קיימת
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, uploadDir)
+    },
+    filename: function (req, file, cb) {
+        // יצירת שם ייחודי לקובץ (מונע דריסת קבצים)
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        // המרת השם לאנגלית בלבד כדי למנוע בעיות קידוד
+        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
+        cb(null, uniqueSuffix + '-' + cleanName);
+    }
+});
+
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 50 * 1024 * 1024 } // הגבלה ל-50MB
+});
+
+// ✅ חשיפת הקבצים הסטטיים
+// הלקוח (האתר)
 app.use(express.static(path.join(__dirname, '..', 'client')));
+// קבצי CSS/JS
 app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
 app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
+// קבצים שהועלו (תמונות/סרטונים/משימות)
+app.use('/uploads', express.static(uploadDir));
+
 
 // חיבור ל-MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
 
 console.log('🔗 Connecting to MongoDB...');
 
-// סכמות MongoDB
+// סכמות MongoDB (נשמרו מהקוד המקורי)
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -100,12 +132,9 @@ const Assignment = mongoose.model('Assignment', assignmentSchema);
 const Event = mongoose.model('Event', eventSchema);
 const Media = mongoose.model('Media', mediaSchema);
 
-// יצירת משתמשים ברירת מחדל אם לא קיימים
+// יצירת משתמשים ברירת מחדל
 async function createDefaultUsers() {
   try {
-    console.log('🔧 Checking for default users...');
-    
-    // משתמש מנהל
     const existingAdmin = await User.findOne({ email: 'yairfrish2@gmail.com' });
     if (!existingAdmin) {
       const hashedPassword = await bcrypt.hash('yair12345', 10);
@@ -118,152 +147,10 @@ async function createDefaultUsers() {
         createdAt: new Date()
       });
       await adminUser.save();
-      console.log('✅ Default admin user created: yairfrish2@gmail.com');
-    } else {
-      console.log('✅ Admin user already exists');
+      console.log('✅ Default admin user created');
     }
-
-    // משתמש מורה
-    const existingTeacher = await User.findOne({ email: 'teacher@school.com' });
-    if (!existingTeacher) {
-      const hashedPassword = await bcrypt.hash('123456', 10);
-      const teacherUser = new User({
-        name: 'מורה לדוגמה',
-        email: 'teacher@school.com',
-        password: hashedPassword,
-        role: 'teacher',
-        classes: [],
-        createdAt: new Date()
-      });
-      await teacherUser.save();
-      console.log('✅ Default teacher user created: teacher@school.com');
-    } else {
-      console.log('✅ Teacher user already exists');
-    }
-
-    // משתמש תלמיד
-    const existingStudent = await User.findOne({ email: 'student@school.com' });
-    if (!existingStudent) {
-      const hashedPassword = await bcrypt.hash('123456', 10);
-      const studentUser = new User({
-        name: 'תלמיד לדוגמה',
-        email: 'student@school.com',
-        password: hashedPassword,
-        role: 'student',
-        classes: [],
-        createdAt: new Date()
-      });
-      await studentUser.save();
-      console.log('✅ Default student user created: student@school.com');
-    } else {
-      console.log('✅ Student user already exists');
-    }
-
-    console.log('🔧 Default users setup completed');
   } catch (error) {
     console.error('❌ Error creating default users:', error);
-  }
-}
-
-// יצירת נתוני דמה אם אין נתונים
-async function createSampleData() {
-  try {
-    console.log('🔧 Checking for sample data...');
-    
-    const adminUser = await User.findOne({ email: 'yairfrish2@gmail.com' });
-    if (!adminUser) {
-      console.log('❌ Admin user not found for sample data');
-      return;
-    }
-
-    // בדוק אם יש הודעות
-    const announcementsCount = await Announcement.countDocuments();
-    if (announcementsCount === 0) {
-      console.log('📢 Creating sample announcements...');
-      
-      const sampleAnnouncements = [
-        {
-          title: 'ברוכים הבאים למערכת פרחי אהרון!',
-          content: 'אנו שמחים להשיק את המערכת החדשה לניהול בית הספר. כאן תוכלו למצוא הודעות, משימות, אירועים ועוד.',
-          author: adminUser._id,
-          isGlobal: true,
-          createdAt: new Date()
-        },
-        {
-          title: 'תחילת שנה"ל תשפ"ד',
-          content: 'ברכות לתלמידים ולצוות על פתיחת שנה"ל. נשמח לראות אתכם פעילים ומשתתפים בכל הפעילויות.',
-          author: adminUser._id,
-          isGlobal: true,
-          createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000)
-        }
-      ];
-      
-      await Announcement.insertMany(sampleAnnouncements);
-      console.log('✅ Sample announcements created');
-    } else {
-      console.log(`✅ Already have ${announcementsCount} announcements`);
-    }
-
-    // 🔥 NEW: Create sample assignments
-    const assignmentsCount = await Assignment.countDocuments();
-    if (assignmentsCount === 0) {
-      console.log('📚 Creating sample assignments...');
-      
-      // Find a class and teacher
-      const teacher = await User.findOne({ email: 'teacher@school.com' });
-      const student = await User.findOne({ email: 'student@school.com' });
-      
-      if (teacher) {
-        // Create a sample class
-        const sampleClass = new Class({
-          name: 'כיתה ז1',
-          teacher: teacher._id,
-          teachers: [teacher._id],
-          students: student ? [student._id] : []
-        });
-        await sampleClass.save();
-        
-        // Create sample assignments
-        const sampleAssignments = [
-          {
-            title: 'משימה במתמטיקה - שברים',
-            description: 'פתרו את התרגילים בעמוד 45 במחברת.',
-            class: sampleClass._id,
-            teacher: teacher._id,
-            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Due in 7 days
-            submissions: []
-          },
-          {
-            title: 'עבודה בהיסטוריה - תקופת בית שני',
-            description: 'כתבו עבודה על חיי היום-יום בתקופת בית השני.',
-            class: sampleClass._id,
-            teacher: teacher._id,
-            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Due in 14 days
-            submissions: []
-          }
-        ];
-        
-        await Assignment.insertMany(sampleAssignments);
-        console.log('✅ Sample assignments created');
-        
-        // Add class to student if exists
-        if (student) {
-          student.classes.push(sampleClass._id);
-          await student.save();
-          console.log('✅ Added sample class to student');
-        }
-        
-        // Add class to teacher
-        teacher.classes.push(sampleClass._id);
-        await teacher.save();
-        console.log('✅ Added sample class to teacher');
-      }
-    } else {
-      console.log(`✅ Already have ${assignmentsCount} assignments`);
-    }
-
-  } catch (error) {
-    console.error('❌ Error creating sample data:', error);
   }
 }
 
@@ -271,9 +158,7 @@ async function createSampleData() {
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB');
-    createDefaultUsers().then(() => {
-      createSampleData();
-    });
+    createDefaultUsers();
   })
   .catch(err => {
     console.error('❌ MongoDB connection error:', err);
@@ -284,721 +169,377 @@ const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
 
-  if (!token) {
-    console.log('🔐 No token provided');
-    return res.status(401).json({ error: 'Access token required' });
-  }
+  if (!token) return res.status(401).json({ error: 'Access token required' });
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    
     const user = await User.findById(decoded.userId).select('-password');
-    if (!user) {
-      console.log('❌ User not found for token');
-      return res.status(403).json({ error: 'User not found' });
-    }
+    if (!user) return res.status(403).json({ error: 'User not found' });
 
     req.user = {
       userId: decoded.userId,
       email: decoded.email,
       role: decoded.role
     };
-    console.log('✅ Token validated for user:', user.email);
     next();
   } catch (error) {
-    console.log('❌ Invalid token:', error.message);
     return res.status(403).json({ error: 'Invalid token' });
   }
 };
 
-// Routes
+// --- Routes ---
 
 // Health check
 app.get('/api/health', (req, res) => {
-  console.log('💊 Health check requested');
-  res.json({ 
-    status: 'OK', 
-    message: 'Server is running',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'OK', message: 'Server is running' });
 });
 
-// Auth routes
+// Auth
 app.post('/api/register', async (req, res) => {
   try {
-    console.log('👤 Registration attempt:', req.body);
     const { name, email, password, role } = req.body;
-    
-    if (!name || !email || !password || !role) {
-      console.log('❌ Missing fields in registration');
-      return res.status(400).json({ error: 'All fields are required' });
-    }
+    if (!name || !email || !password || !role) return res.status(400).json({ error: 'All fields are required' });
 
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      console.log('❌ User already exists:', email);
-      return res.status(400).json({ error: 'User already exists with this email' });
-    }
+    if (existingUser) return res.status(400).json({ error: 'User already exists' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = new User({ name, email, password: hashedPassword, role, classes: [] });
     await user.save();
 
     const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
-    
-    console.log('✅ User registered successfully:', email);
-    res.json({
-      message: 'User created successfully',
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
-    });
+    res.json({ message: 'User created', token, user: { id: user._id, name, email, role } });
   } catch (error) {
-    console.error('❌ Registration error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Error registering user' });
   }
 });
 
 app.post('/api/login', async (req, res) => {
   try {
-    console.log('🔐 Login attempt:', { email: req.body.email, password: '***' });
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      console.log('❌ Missing email or password');
-      return res.status(400).json({ error: 'Email and password are required' });
-    }
-
     const user = await User.findOne({ email });
-    console.log('👤 User lookup result:', user ? `Found user: ${user.email}` : 'User not found');
-    
-    if (!user) {
-      console.log('❌ User not found for email:', email);
-      return res.status(400).json({ error: 'Invalid email or password' });
-    }
+    if (!user) return res.status(400).json({ error: 'Invalid email or password' });
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    console.log('🔑 Password validation result:', isPasswordValid);
-    
-    if (!isPasswordValid) {
-      console.log('❌ Invalid password for user:', email);
-      return res.status(400).json({ error: 'Invalid email or password' });
-    }
+    if (!isPasswordValid) return res.status(400).json({ error: 'Invalid email or password' });
 
     const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
-
-    console.log('✅ Login successful for user:', user.email);
-    res.json({
-      message: 'Login successful',
-      token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role }
-    });
+    res.json({ message: 'Login successful', token, user: { id: user._id, name, email, role } });
   } catch (error) {
-    console.error('❌ Login error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Error logging in' });
   }
 });
 
 app.get('/api/validate-token', authenticateToken, async (req, res) => {
   try {
-    console.log('🔍 Token validation request for user:', req.user.email);
     const user = await User.findById(req.user.userId).select('-password');
-    if (!user) {
-      console.log('❌ User not found during token validation');
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    console.log('✅ Token validated successfully for:', user.email);
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role
-    });
+    res.json({ id: user._id, name: user.name, email: user.email, role: user.role });
   } catch (error) {
-    console.error('❌ Token validation error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Change password route
 app.post('/api/change-password', authenticateToken, async (req, res) => {
-  try {
-    console.log('🔑 Change password request for:', req.user.email);
-    const { newPassword } = req.body;
-
-    if (!newPassword) {
-      return res.status(400).json({ error: 'New password is required' });
+    try {
+      const { newPassword } = req.body;
+      if (!newPassword) return res.status(400).json({ error: 'New password is required' });
+  
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await User.findByIdAndUpdate(req.user.userId, { password: hashedPassword });
+      res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
     }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await User.findByIdAndUpdate(req.user.userId, { password: hashedPassword });
-
-    console.log('✅ Password changed successfully for:', req.user.email);
-    res.json({ message: 'Password changed successfully' });
-  } catch (error) {
-    console.error('❌ Change password error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-// Users routes
+// Users
 app.get('/api/users', authenticateToken, async (req, res) => {
-  try {
-    console.log('👥 Users list requested by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      console.log('❌ Admin access required for users list');
-      return res.status(403).json({ error: 'Admin access required' });
-    }
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
     const users = await User.find().select('-password');
-    console.log('✅ Users list sent, count:', users.length);
     res.json(users);
-  } catch (error) {
-    console.error('❌ Get users error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.post('/api/users', authenticateToken, async (req, res) => {
-  try {
-    console.log('👤 Create user request by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-    const { name, email, password, role } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ name, email, password: hashedPassword, role, classes: [] });
-    await user.save();
-    console.log('✅ User created:', email);
-    res.json({ message: 'User created', user: { id: user._id, name, email, role } });
-  } catch (error) {
-    console.error('❌ Create user error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const { name, email, password, role } = req.body;
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = new User({ name, email, password: hashedPassword, role });
+        await user.save();
+        res.json({ message: 'User created' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/api/users/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('👤 Update user request by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const { name, email, role, password } = req.body;
-    const updateData = { name, email, role };
-
-    // אם סיסמה סופקה, הצפן אותה
-    if (password) {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updateData.password = hashedPassword;
-    }
-
-    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true }).select('-password');
-    console.log('✅ User updated:', email);
-    res.json({ message: 'User updated', user });
-  } catch (error) {
-    console.error('❌ Update user error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const { name, email, role, password } = req.body;
+        const updateData = { name, email, role };
+        if (password) updateData.password = await bcrypt.hash(password, 10);
+        
+        const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        res.json({ message: 'User updated', user });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete('/api/users/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🗑️ Delete user request by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
     await User.findByIdAndDelete(req.params.id);
-    console.log('✅ User deleted:', req.params.id);
     res.json({ message: 'User deleted' });
-  } catch (error) {
-    console.error('❌ Delete user error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-// Classes routes
+// Classes
 app.get('/api/classes', authenticateToken, async (req, res) => {
-  try {
-    console.log('🏫 Classes list requested by:', req.user.email);
     const classes = await Class.find()
       .populate('teacher', 'name email')
       .populate('teachers', 'name email')
       .populate('students', 'name email');
-    console.log('✅ Classes list sent, count:', classes.length);
     res.json(classes);
-  } catch (error) {
-    console.error('❌ Get classes error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.post('/api/classes', authenticateToken, async (req, res) => {
-  try {
-    console.log('🏫 Create class request by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     const { name, teachers } = req.body;
     const newClass = new Class({
-      name,
-      teacher: req.user.userId,
-      teachers: [req.user.userId, ...(teachers || [])],
-      students: []
+        name,
+        teacher: req.user.userId,
+        teachers: [req.user.userId, ...(teachers || [])],
+        students: []
     });
     await newClass.save();
-    console.log('✅ Class created:', name);
     res.json(newClass);
-  } catch (error) {
-    console.error('❌ Create class error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.put('/api/classes/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🏫 Update class request by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
     const { name, teachers, students } = req.body;
     const updatedClass = await Class.findByIdAndUpdate(
-      req.params.id, 
-      { name, teachers, students }, 
-      { new: true }
-    ).populate('teachers', 'name email').populate('students', 'name email');
-    
-    console.log('✅ Class updated:', name);
+        req.params.id, 
+        { name, teachers, students }, 
+        { new: true }
+    );
     res.json(updatedClass);
-  } catch (error) {
-    console.error('❌ Update class error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🗑️ Delete class request by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     await Class.findByIdAndDelete(req.params.id);
-    console.log('✅ Class deleted:', req.params.id);
     res.json({ message: 'Class deleted' });
-  } catch (error) {
-    console.error('❌ Delete class error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-// 🔥 NEW: Class-specific assignments endpoint
+// Class specific data
 app.get('/api/classes/:id/assignments', authenticateToken, async (req, res) => {
-  try {
-    console.log('📚 Class assignments requested by:', req.user.email);
-    const assignments = await Assignment.find({ class: req.params.id })
-      .populate('class', 'name')
-      .populate('teacher', 'name')
-      .sort({ dueDate: 1 });
-    console.log('✅ Class assignments sent, count:', assignments.length);
+    const assignments = await Assignment.find({ class: req.params.id }).populate('class teacher');
     res.json(assignments);
-  } catch (error) {
-    console.error('❌ Get class assignments error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-// 🔥 NEW: Class-specific announcements endpoint
 app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) => {
-  try {
-    console.log('📢 Class announcements requested by:', req.user.email);
     const announcements = await Announcement.find({ 
-      $or: [
-        { class: req.params.id },
-        { isGlobal: true }
-      ]
-    })
-      .populate('author', 'name')
-      .populate('class', 'name')
-      .sort({ createdAt: -1 });
-    console.log('✅ Class announcements sent, count:', announcements.length);
+        $or: [{ class: req.params.id }, { isGlobal: true }]
+    }).populate('author class').sort({ createdAt: -1 });
     res.json(announcements);
-  } catch (error) {
-    console.error('❌ Get class announcements error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-// 🔥 FIX: Announcements routes - MAKE GET PUBLIC
+// Announcements
 app.get('/api/announcements', async (req, res) => {
-  try {
-    console.log('📢 Announcements requested');
-    const announcements = await Announcement.find({ isGlobal: true })
-      .populate('author', 'name')
-      .populate('class', 'name')
-      .sort({ createdAt: -1 });
-    console.log('✅ Announcements sent, count:', announcements.length);
+    const announcements = await Announcement.find({ isGlobal: true }).populate('author class').sort({ createdAt: -1 });
     res.json(announcements);
-  } catch (error) {
-    console.error('❌ Get announcements error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.post('/api/announcements', authenticateToken, async (req, res) => {
-  try {
-    console.log('📢 Create announcement by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     const { title, content, isGlobal, classId } = req.body;
     const announcement = new Announcement({
-      title,
-      content,
-      author: req.user.userId,
-      isGlobal: isGlobal || false,
-      class: classId || null
+        title, content, author: req.user.userId, isGlobal: isGlobal || false, class: classId || null
     });
     await announcement.save();
-    await announcement.populate('author', 'name');
-    console.log('✅ Announcement created:', title);
     res.json(announcement);
-  } catch (error) {
-    console.error('❌ Create announcement error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🗑️ Delete announcement by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     await Announcement.findByIdAndDelete(req.params.id);
-    console.log('✅ Announcement deleted:', req.params.id);
-    res.json({ message: 'Announcement deleted' });
-  } catch (error) {
-    console.error('❌ Delete announcement error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    res.json({ message: 'Deleted' });
 });
 
-// 🔥 FIXED: Assignments routes - עם יותר logging ודיבאג
+// Assignments - ✅ FIXED: Student View Logic
 app.get('/api/assignments', authenticateToken, async (req, res) => {
-  try {
-    console.log('📚 Assignments requested by:', req.user.email, 'role:', req.user.role);
-    
-    let assignments;
-    if (req.user.role === 'student') {
-      // For students, only show assignments for their classes
-      console.log('🎒 Looking up student data...');
-      const user = await User.findById(req.user.userId).populate('classes');
-      console.log('🎒 Student found:', user?.email);
-      console.log('🎒 Student classes:', user?.classes);
-      
-      const classIds = user.classes.map(c => c._id);
-      console.log('🎒 Student class IDs:', classIds);
-      
-      if (classIds.length === 0) {
-        console.log('🎒 Student has no classes assigned');
-        assignments = [];
-      } else {
-        assignments = await Assignment.find({ class: { $in: classIds } })
-          .populate('class', 'name')
-          .populate('teacher', 'name')
-          .sort({ dueDate: 1 });
-      }
-      
-      console.log('📝 Student assignments found:', assignments.length);
-    } else {
-      // For teachers/admins, show all assignments
-      assignments = await Assignment.find()
-        .populate('class', 'name')
-        .populate('teacher', 'name')
-        .sort({ dueDate: 1 });
-        
-      console.log('👨‍🏫 Teacher/admin assignments found:', assignments.length);
+    try {
+        let assignments;
+        if (req.user.role === 'student') {
+            // חיפוש כיתות שהתלמיד רשום בהן ב-Class collection
+            const studentClasses = await Class.find({ students: req.user.userId });
+            const classIds = studentClasses.map(c => c._id);
+            
+            if (classIds.length === 0) {
+                assignments = [];
+            } else {
+                assignments = await Assignment.find({ class: { $in: classIds } })
+                    .populate('class', 'name')
+                    .populate('teacher', 'name')
+                    .sort({ dueDate: 1 });
+            }
+        } else {
+            // מורים ומנהלים רואים הכל
+            assignments = await Assignment.find()
+                .populate('class', 'name')
+                .populate('teacher', 'name')
+                .sort({ dueDate: 1 });
+        }
+        res.json(assignments);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
-    
-    console.log('✅ Assignments sent, count:', assignments.length);
-    res.json(assignments);
-  } catch (error) {
-    console.error('❌ Get assignments error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.post('/api/assignments', authenticateToken, async (req, res) => {
-  try {
-    console.log('📚 Create assignment by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     const { title, description, classId, dueDate } = req.body;
     const assignment = new Assignment({
-      title,
-      description,
-      class: classId,
-      teacher: req.user.userId,
-      dueDate,
-      submissions: []
+        title, description, class: classId, teacher: req.user.userId, dueDate, submissions: []
     });
     await assignment.save();
-    console.log('✅ Assignment created:', title);
     res.json(assignment);
-  } catch (error) {
-    console.error('❌ Create assignment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-// 🔥 NEW: Update assignment endpoint
+// ✅ FIXED: Assignment Submission with File Upload
+app.post('/api/assignments/submit', authenticateToken, upload.single('file'), async (req, res) => {
+    try {
+        const { assignmentId, submission } = req.body;
+        
+        // מציאת המשימה
+        const assignment = await Assignment.findById(assignmentId);
+        if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+
+        // הכנת הנתונים להגשה
+        let fileUrl = null;
+        if (req.file) {
+            fileUrl = `/uploads/${req.file.filename}`;
+        }
+
+        // בדיקה אם כבר קיימת הגשה
+        const existingSubIndex = assignment.submissions.findIndex(s => s.student.toString() === req.user.userId);
+        
+        const newSubmission = {
+            student: req.user.userId,
+            submission: submission || '',
+            fileUrl: fileUrl, // שמירת נתיב הקובץ אם קיים
+            submittedAt: new Date()
+        };
+
+        if (existingSubIndex > -1) {
+            // עדכון הגשה קיימת - שומרים על הקובץ הישן אם לא הועלה חדש
+            if (!fileUrl && assignment.submissions[existingSubIndex].fileUrl) {
+                newSubmission.fileUrl = assignment.submissions[existingSubIndex].fileUrl;
+            }
+            assignment.submissions[existingSubIndex] = { ...assignment.submissions[existingSubIndex], ...newSubmission };
+        } else {
+            assignment.submissions.push(newSubmission);
+        }
+
+        await assignment.save();
+        res.json({ message: 'Submitted successfully' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error submitting assignment' });
+    }
+});
+
 app.put('/api/assignments/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('📚 Update assignment by:', req.user.email);
     const { title, description, dueDate } = req.body;
-
-    // Find the assignment first to check permissions
     const assignment = await Assignment.findById(req.params.id);
-    if (!assignment) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-
-    // Check if user has permission to edit
-    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    const updatedAssignment = await Assignment.findByIdAndUpdate(
-      req.params.id,
-      { title, description, dueDate },
-      { new: true }
-    ).populate('class', 'name').populate('teacher', 'name');
-
-    console.log('✅ Assignment updated:', title);
-    res.json(updatedAssignment);
-  } catch (error) {
-    console.error('❌ Update assignment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// 🔥 FIXED: Assignment submission endpoint
-app.post('/api/assignments/submit', authenticateToken, async (req, res) => {
-  try {
-    console.log('📝 Assignment submission by:', req.user.email);
-    const { assignmentId, submission } = req.body;
-
-    if (!assignmentId) {
-      return res.status(400).json({ error: 'Assignment ID is required' });
-    }
-
-    const assignment = await Assignment.findById(assignmentId);
-    if (!assignment) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-
-    // Check if student already submitted
-    const existingSubmission = assignment.submissions.find(
-      sub => sub.student.toString() === req.user.userId
-    );
-
-    if (existingSubmission) {
-      // Update existing submission
-      existingSubmission.submission = submission || existingSubmission.submission;
-      existingSubmission.submittedAt = new Date();
-    } else {
-      // Add new submission
-      assignment.submissions.push({
-        student: req.user.userId,
-        submission: submission || '',
-        submittedAt: new Date()
-      });
-    }
-
-    await assignment.save();
-    console.log('✅ Assignment submitted successfully');
-    res.json({ message: 'Assignment submitted successfully' });
-  } catch (error) {
-    console.error('❌ Assignment submission error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.get('/api/assignments/:id/submissions', authenticateToken, async (req, res) => {
-  try {
-    console.log('📋 Assignment submissions requested by:', req.user.email);
-    const assignment = await Assignment.findById(req.params.id)
-      .populate('submissions.student', 'name email')
-      .populate('class', 'name');
-
-    if (!assignment) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-
-    // Only teacher or admin can view submissions
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    console.log('✅ Submissions sent, count:', assignment.submissions.length);
-    res.json(assignment.submissions);
-  } catch (error) {
-    console.error('❌ Get submissions error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
-  try {
-    console.log('🎓 Grade assignment by:', req.user.email);
-    const { assignmentId, studentId, grade } = req.body;
-
-    if (!assignmentId || !studentId) {
-      return res.status(400).json({ error: 'Assignment ID and student ID are required' });
-    }
-
-    const assignment = await Assignment.findById(assignmentId);
-    if (!assignment) {
-      return res.status(404).json({ error: 'Assignment not found' });
-    }
-
-    // Only teacher or admin can grade
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    const submission = assignment.submissions.find(
-      sub => sub.student.toString() === studentId
-    );
-
-    if (!submission) {
-      return res.status(404).json({ error: 'Submission not found' });
-    }
-
-    submission.grade = grade;
-    await assignment.save();
-
-    console.log('✅ Grade updated successfully');
-    res.json({ message: 'Grade updated successfully' });
-  } catch (error) {
-    console.error('❌ Grade assignment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    if (!assignment) return res.status(404).json({ error: 'Not found' });
+    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) return res.status(403).json({ error: 'Denied' });
+    
+    const updated = await Assignment.findByIdAndUpdate(req.params.id, { title, description, dueDate }, { new: true });
+    res.json(updated);
 });
 
 app.delete('/api/assignments/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🗑️ Delete assignment by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     await Assignment.findByIdAndDelete(req.params.id);
-    console.log('✅ Assignment deleted:', req.params.id);
-    res.json({ message: 'Assignment deleted' });
-  } catch (error) {
-    console.error('❌ Delete assignment error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    res.json({ message: 'Deleted' });
 });
 
-// Events routes - MAKE GET PUBLIC
+app.get('/api/assignments/:id/submissions', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const assignment = await Assignment.findById(req.params.id).populate('submissions.student', 'name email');
+    res.json(assignment.submissions);
+});
+
+app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const { assignmentId, studentId, grade } = req.body;
+    const assignment = await Assignment.findById(assignmentId);
+    const sub = assignment.submissions.find(s => s.student.toString() === studentId);
+    if (sub) {
+        sub.grade = grade;
+        await assignment.save();
+        res.json({ message: 'Graded' });
+    } else {
+        res.status(404).json({ error: 'Submission not found' });
+    }
+});
+
+// Events
 app.get('/api/events', async (req, res) => {
-  try {
-    console.log('📅 Events requested');
-    const events = await Event.find()
-      .populate('author', 'name')
-      .sort({ date: 1 });
-    console.log('✅ Events sent, count:', events.length);
+    const events = await Event.find().populate('author', 'name').sort({ date: 1 });
     res.json(events);
-  } catch (error) {
-    console.error('❌ Get events error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.post('/api/events', authenticateToken, async (req, res) => {
-  try {
-    console.log('📅 Create event by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     const { title, description, date } = req.body;
     const event = new Event({ title, description, date, author: req.user.userId });
     await event.save();
-    console.log('✅ Event created:', title);
     res.json(event);
-  } catch (error) {
-    console.error('❌ Create event error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.delete('/api/events/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🗑️ Delete event by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     await Event.findByIdAndDelete(req.params.id);
-    console.log('✅ Event deleted:', req.params.id);
-    res.json({ message: 'Event deleted' });
-  } catch (error) {
-    console.error('❌ Delete event error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    res.json({ message: 'Deleted' });
 });
 
-// Media routes - MAKE GET PUBLIC
+// Media - ✅ FIXED: Upload Logic (500 Error Fix)
 app.get('/api/media', async (req, res) => {
-  try {
-    console.log('🖼️ Media requested');
-    const media = await Media.find()
-      .populate('author', 'name')
-      .sort({ createdAt: -1 });
-    console.log('✅ Media sent, count:', media.length);
+    const media = await Media.find().populate('author', 'name').sort({ createdAt: -1 });
     res.json(media);
-  } catch (error) {
-    console.error('❌ Get media error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
-app.post('/api/media', authenticateToken, async (req, res) => {
-  try {
-    console.log('🖼️ Create media by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
+app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
+    try {
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+        
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+        const { title, type, date } = req.body;
+        const fileUrl = `/uploads/${req.file.filename}`;
+
+        const media = new Media({ 
+            title, 
+            type, 
+            url: fileUrl, 
+            date, 
+            author: req.user.userId 
+        });
+        await media.save();
+        res.json(media);
+    } catch (error) {
+        console.error('Upload Error:', error);
+        res.status(500).json({ error: 'Error uploading media' });
     }
-    const { title, type, url, date } = req.body;
-    const media = new Media({ title, type, url, date, author: req.user.userId });
-    await media.save();
-    console.log('✅ Media created:', title);
-    res.json(media);
-  } catch (error) {
-    console.error('❌ Create media error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 app.delete('/api/media/:id', authenticateToken, async (req, res) => {
-  try {
-    console.log('🗑️ Delete media by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    // אופציונלי: מחיקת הקובץ הפיזי מהשרת כאן (דורש שליפת ה-URL קודם)
     await Media.findByIdAndDelete(req.params.id);
-    console.log('✅ Media deleted:', req.params.id);
-    res.json({ message: 'Media deleted' });
-  } catch (error) {
-    console.error('❌ Delete media error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    res.json({ message: 'Deleted' });
 });
 
 // Serve index.html for all other routes
 app.get('*', (req, res) => {
-  console.log('📄 Serving index.html for route:', req.url);
   res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
 
@@ -1011,9 +552,5 @@ app.use((error, req, res, next) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📁 MongoDB: Connected`);
-  console.log(`🔐 JWT Secret: ${JWT_SECRET ? 'Set' : 'Not set'}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`✅ All API endpoints are available`);
-  console.log(`🏠 Home: https://fa-v8kd.onrender.com`);
-  console.log(`💊 Health: https://fa-v8kd.onrender.com/api/health`);
+  console.log(`📂 Uploads dir: ${uploadDir}`);
 });
