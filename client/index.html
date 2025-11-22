@@ -42,10 +42,29 @@
         <div class="container">
             <!-- Home Page -->
             <div id="home-page" class="page">
-                <div class="hero">
-                    <h2>מסיימים כיתה ומתלבטים איפה להמשיך שנה הבאה</h2>
-                    <p>בואו והצטרפו אלינו</p>
-                    <a href="https://68fdda4e0b7f0.site123.me/" class="btn btn-secondary">לחצו כאן</a>
+                <div class="recruitment-section">
+                    <h3>מסיימים יסודי ומתלבטים איפה להמשיך שנה הבאה?</h3>
+                    <p>בואו והצטרפו אלינו לחטיבת הביניים פרחי אהרון</p>
+                    <div class="recruitment-buttons">
+                        <a href="https://68fdda4e0b7f0.site123.me/" class="btn btn-secondary">לאתר הכיתות שלנו</a>
+                        <a href="#" class="btn" onclick="uiManager.showPage('events')">לוח האירועים שלנו</a>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">ברוכים הבאים לחטיבת פרחי אהרון</h2>
+                    </div>
+                    <div class="announcement-content">
+                        <p>מערכת ניהול לימודים מתקדמת למורים, תלמידים והורים. כאן תוכלו למצוא:</p>
+                        <ul>
+                            <li>הודעות ועדכונים שוטפים</li>
+                            <li>משימות ומטלות לימודיות</li>
+                            <li>לוח אירועים ופעילויות</li>
+                            <li>תמונות וסרטונים מהפעילויות</li>
+                            <li>ניהול כיתות ומערכת שעות</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
             
@@ -318,6 +337,66 @@
         </div>
     </div>
 
+    <!-- Submit Assignment Modal -->
+    <div id="submit-assignment-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>הגשת משימה</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <form id="submit-assignment-form">
+                <input type="hidden" id="submission-assignment-id">
+                
+                <div class="form-group">
+                    <label for="submission-text">תשובה (אופציונלי)</label>
+                    <textarea id="submission-text" placeholder="הזן את התשובה שלך כאן..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="submission-file">העלאת קובץ (אופציונלי)</label>
+                    <div class="file-upload" id="file-upload-area">
+                        <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; margin-bottom: 1rem; color: var(--gray);"></i>
+                        <p>גרור קובץ לכאן או לחץ לבחירה</p>
+                        <small>קבצים נתמכים: PDF, Word, תמונות (מקסימום 10MB)</small>
+                        <input type="file" id="submission-file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="display: none;">
+                    </div>
+                </div>
+                
+                <div id="file-preview" style="display:none; margin-bottom:1rem;">
+                    <div class="file-preview">
+                        <div class="file-info">
+                            <i class="fas fa-file file-icon"></i>
+                            <div class="file-details">
+                                <h4 id="file-name"></h4>
+                                <p id="file-size"></p>
+                            </div>
+                        </div>
+                        <div class="file-actions">
+                            <button type="button" id="remove-file" class="btn btn-danger btn-sm">הסר קובץ</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn">הגש משימה</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- View Submissions Modal -->
+    <div id="view-submissions-modal" class="modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>הגשות תלמידים</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <div id="submissions-list">
+                <div class="loading">טוען הגשות...</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Add User Modal -->
     <div id="add-user-modal" class="modal">
         <div class="modal-content">
@@ -493,7 +572,7 @@
                 <button class="close-modal">&times;</button>
             </div>
             
-            <form id="add-media-form">
+            <form id="add-media-form" enctype="multipart/form-data">
                 <div class="form-group">
                     <label for="media-title">כותרת</label>
                     <input type="text" id="media-title" required>
@@ -508,8 +587,17 @@
                 </div>
                 
                 <div class="form-group">
-                    <label for="media-url">קישור</label>
-                    <input type="url" id="media-url" required placeholder="https://example.com/image.jpg">
+                    <label for="media-file">העלאת קובץ</label>
+                    <div class="file-upload" id="media-upload-area">
+                        <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; margin-bottom: 1rem; color: var(--gray);"></i>
+                        <p>גרור קובץ לכאן או לחץ לבחירה</p>
+                        <small id="media-file-types">תמונות נתמכות: JPG, PNG, GIF (מקסימום 10MB)</small>
+                        <input type="file" id="media-file" accept=".jpg,.jpeg,.png,.gif,.mp4,.mov,.avi" style="display: none;">
+                    </div>
+                </div>
+                
+                <div id="media-preview" class="upload-preview" style="display:none;">
+                    <!-- Preview will be shown here -->
                 </div>
                 
                 <div class="form-group">
