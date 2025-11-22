@@ -83,8 +83,7 @@ class DatabaseManager {
     // ===== USERS =====
     async getUsers() {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
-            console.log('🔒 Admin access required for users list');
-            return [];
+            throw new Error('Admin access required');
         }
         return this.makeRequest('/users');
     }
@@ -93,54 +92,57 @@ class DatabaseManager {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
             throw new Error('Admin access required');
         }
-        return this.makeRequest('/users', {
-            method: 'POST',
-            body: JSON.stringify(userData)
-        });
+        return this.makeRequest('/users', { method: 'POST', body: JSON.stringify(userData) });
+    }
+
+    async updateUser(userId, userData) {
+        if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
+            throw new Error('Admin access required');
+        }
+        return this.makeRequest(`/users/${userId}`, { method: 'PUT', body: JSON.stringify(userData) });
     }
 
     async deleteUser(userId) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
             throw new Error('Admin access required');
         }
-        return this.makeRequest(`/users/${userId}`, {
-            method: 'DELETE'
-        });
+        return this.makeRequest(`/users/${userId}`, { method: 'DELETE' });
     }
 
     // ===== CLASSES =====
     async getClasses() {
         if (!authManager || !authManager.isAuthenticated()) {
-            console.log('🔒 Authentication required for classes');
-            return [];
+            throw new Error('Authentication required');
         }
         return this.makeRequest('/classes');
     }
 
     async getUserClasses() {
         if (!authManager || !authManager.isAuthenticated()) {
-            return [];
+            throw new Error('Authentication required');
         }
-        return this.makeRequest('/classes');
+        return this.makeRequest(`/users/${authManager.currentUser.id}/classes`);
     }
 
     async createClass(classData) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest('/classes', {
-            method: 'POST',
-            body: JSON.stringify(classData)
-        });
+        return this.makeRequest('/classes', { method: 'POST', body: JSON.stringify(classData) });
+    }
+
+    async updateClass(classId, classData) {
+        if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
+            throw new Error('Admin access required');
+        }
+        return this.makeRequest(`/classes/${classId}`, { method: 'PUT', body: JSON.stringify(classData) });
     }
 
     async deleteClass(classId) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest(`/classes/${classId}`, {
-            method: 'DELETE'
-        });
+        return this.makeRequest(`/classes/${classId}`, { method: 'DELETE' });
     }
 
     // ===== CLASS-SPECIFIC DATA =====
@@ -160,104 +162,82 @@ class DatabaseManager {
 
     // ===== ANNOUNCEMENTS =====
     async getAnnouncements() {
-        // Announcements are public - no authentication required
-        try {
-            return await this.makeRequest('/announcements');
-        } catch (error) {
-            console.log('🔒 Returning empty announcements due to auth error');
-            return [];
-        }
+        // Announcements are public, but we handle 401 gracefully
+        return this.makeRequest('/announcements');
     }
 
     async createAnnouncement(announcementData) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest('/announcements', {
-            method: 'POST',
-            body: JSON.stringify(announcementData)
-        });
+        return this.makeRequest('/announcements', { method: 'POST', body: JSON.stringify(announcementData) });
     }
 
     async deleteAnnouncement(announcementId) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest(`/announcements/${announcementId}`, {
-            method: 'DELETE'
-        });
+        return this.makeRequest(`/announcements/${announcementId}`, { method: 'DELETE' });
     }
 
     // ===== ASSIGNMENTS =====
     async getAssignments() {
         if (!authManager || !authManager.isAuthenticated()) {
-            console.log('🔒 Authentication required for assignments');
-            return [];
+            throw new Error('Authentication required');
         }
-        
-        try {
-            console.log('📚 Fetching assignments for user:', authManager.currentUser?.email);
-            const assignments = await this.makeRequest('/assignments');
-            console.log('✅ Assignments fetched successfully, count:', assignments?.length || 0);
-            return assignments || [];
-        } catch (error) {
-            console.error('❌ Error getting assignments:', error);
-            // Return empty array instead of throwing error for better UX
-            return [];
-        }
+        return this.makeRequest('/assignments');
     }
 
     async createAssignment(assignmentData) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest('/assignments', {
-            method: 'POST',
-            body: JSON.stringify(assignmentData)
+        return this.makeRequest('/assignments', { method: 'POST', body: JSON.stringify(assignmentData) });
+    }
+
+    async submitAssignment(formData) {
+        if (!authManager || !authManager.isAuthenticated() || !authManager.isStudent()) {
+            throw new Error('Student access required');
+        }
+        // Note: FormData is used directly, so we remove Content-Type
+        const headers = authManager.getAuthHeaders();
+        delete headers['Content-Type']; 
+
+        return this.makeRequest('/assignments/submit', { 
+            method: 'POST', 
+            body: formData,
+            headers: headers
         });
     }
 
-    // 🔥 NEW: Update assignment function
-    async updateAssignment(assignmentId, assignmentData) {
+    async gradeAssignment(gradeData) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest(`/assignments/${assignmentId}`, {
-            method: 'PUT',
-            body: JSON.stringify(assignmentData)
-        });
+        return this.makeRequest('/assignments/grade', { method: 'POST', body: JSON.stringify(gradeData) });
     }
 
     async deleteAssignment(assignmentId) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest(`/assignments/${assignmentId}`, {
-            method: 'DELETE'
-        });
+        return this.makeRequest(`/assignments/${assignmentId}`, { method: 'DELETE' });
     }
 
     // ===== EVENTS =====
     async getEvents() {
-        // Events are public - no authentication required
-        try {
-            return await this.makeRequest('/events');
-        } catch (error) {
-            console.log('🔒 Returning empty events due to auth error');
-            return [];
-        }
+        // Events are public, but we handle 401 gracefully
+        return this.makeRequest('/events');
     }
 
     async createEvent(eventData) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
-        return this.makeRequest('/events', {
-            method: 'POST',
-            body: JSON.stringify(eventData)
-        });
+        return this.makeRequest('/events', { method: 'POST', body: JSON.stringify(eventData) });
     }
 
+    // ✅ ADDED: Delete Event function
     async deleteEvent(eventId) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
@@ -269,13 +249,8 @@ class DatabaseManager {
 
     // ===== MEDIA =====
     async getMedia() {
-        // Media is public - no authentication required
-        try {
-            return await this.makeRequest('/media');
-        } catch (error) {
-            console.log('🔒 Returning empty media due to auth error');
-            return [];
-        }
+        // Media is public, but we handle 401 gracefully
+        return this.makeRequest('/media');
     }
 
     async createMedia(mediaData) {
@@ -319,5 +294,5 @@ class DatabaseManager {
 }
 
 // Create global instance
-console.log('🚀 Creating database manager instance...');
+console.log('✅ Database Manager code loaded');
 const dbManager = new DatabaseManager();
