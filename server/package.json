@@ -10,7 +10,12 @@
     "setup": "node setup-admin.js",
     "render-build": "npm install"
   },
-  "keywords": ["school", "education", "management", "mongodb"],
+  "keywords": [
+    "school",
+    "education",
+    "management",
+    "mongodb"
+  ],
   "author": "Pirhei Aharon",
   "license": "MIT",
   "dependencies": {
@@ -31,3 +36,4 @@
   }
 
 }
+
