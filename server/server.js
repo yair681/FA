@@ -21,7 +21,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ✅ FIXED: Serve static files from the CORRECT path
 app.use(express.static(path.join(__dirname, '..', 'client')));
@@ -321,6 +322,86 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
+// Helper function to check if teacher has access to class
+const checkClassAccess = async (req, res, next) => {
+  if (req.user.role === 'admin') {
+    return next(); // Admins have access to all classes
+  }
+
+  try {
+    const classId = req.body.classId || req.params.id;
+    if (!classId) {
+      return next(); // No class ID specified
+    }
+
+    const classItem = await Class.findById(classId);
+    if (!classItem) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // Check if user is teacher of this class
+    const isTeacherOfClass = classItem.teachers.some(teacherId => 
+      teacherId.toString() === req.user.userId
+    );
+
+    if (!isTeacherOfClass) {
+      return res.status(403).json({ error: 'Access denied - not a teacher of this class' });
+    }
+
+    next();
+  } catch (error) {
+    console.error('Error checking class access:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Helper function to check if user owns the resource
+const checkResourceOwnership = async (req, res, next) => {
+  if (req.user.role === 'admin') {
+    return next(); // Admins can modify all resources
+  }
+
+  try {
+    const resourceId = req.params.id;
+    let resource;
+
+    // Check announcements
+    resource = await Announcement.findById(resourceId);
+    if (resource) {
+      if (resource.author.toString() !== req.user.userId) {
+        return res.status(403).json({ error: 'Access denied - can only modify your own announcements' });
+      }
+      return next();
+    }
+
+    // Check assignments
+    resource = await Assignment.findById(resourceId);
+    if (resource) {
+      if (resource.teacher.toString() !== req.user.userId) {
+        return res.status(403).json({ error: 'Access denied - can only modify your own assignments' });
+      }
+      return next();
+    }
+
+    // Check classes
+    resource = await Class.findById(resourceId);
+    if (resource) {
+      const isTeacherOfClass = resource.teachers.some(teacherId => 
+        teacherId.toString() === req.user.userId
+      );
+      if (!isTeacherOfClass) {
+        return res.status(403).json({ error: 'Access denied - not a teacher of this class' });
+      }
+      return next();
+    }
+
+    next();
+  } catch (error) {
+    console.error('Error checking resource ownership:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // Routes
 
 // Health check
@@ -530,10 +611,27 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 app.get('/api/classes', authenticateToken, async (req, res) => {
   try {
     console.log('🏫 Classes list requested by:', req.user.email);
-    const classes = await Class.find()
+    
+    let classes;
+    if (req.user.role === 'admin') {
+      // Admins see all classes
+      classes = await Class.find()
+        .populate('teacher', 'name email')
+        .populate('teachers', 'name email')
+        .populate('students', 'name email');
+    } else {
+      // Teachers and students see only their classes
+      classes = await Class.find({
+        $or: [
+          { teachers: req.user.userId },
+          { students: req.user.userId }
+        ]
+      })
       .populate('teacher', 'name email')
       .populate('teachers', 'name email')
       .populate('students', 'name email');
+    }
+    
     console.log('✅ Classes list sent, count:', classes.length);
     res.json(classes);
   } catch (error) {
@@ -564,12 +662,9 @@ app.post('/api/classes', authenticateToken, async (req, res) => {
   }
 });
 
-app.put('/api/classes/:id', authenticateToken, async (req, res) => {
+app.put('/api/classes/:id', authenticateToken, checkResourceOwnership, async (req, res) => {
   try {
     console.log('🏫 Update class request by:', req.user.email);
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
 
     const { name, teachers, students } = req.body;
     const updatedClass = await Class.findByIdAndUpdate(
@@ -586,17 +681,91 @@ app.put('/api/classes/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
+app.delete('/api/classes/:id', authenticateToken, checkResourceOwnership, async (req, res) => {
   try {
     console.log('🗑️ Delete class request by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
     await Class.findByIdAndDelete(req.params.id);
     console.log('✅ Class deleted:', req.params.id);
     res.json({ message: 'Class deleted' });
   } catch (error) {
     console.error('❌ Delete class error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get class assignments
+app.get('/api/classes/:id/assignments', authenticateToken, async (req, res) => {
+  try {
+    console.log('📚 Class assignments requested by:', req.user.email);
+    
+    const classItem = await Class.findById(req.params.id);
+    if (!classItem) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // Check access
+    if (req.user.role !== 'admin') {
+      const hasAccess = classItem.teachers.some(teacherId => 
+        teacherId.toString() === req.user.userId
+      ) || classItem.students.some(studentId => 
+        studentId.toString() === req.user.userId
+      );
+      
+      if (!hasAccess) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    const assignments = await Assignment.find({ class: req.params.id })
+      .populate('teacher', 'name')
+      .populate('class', 'name')
+      .sort({ dueDate: 1 });
+
+    console.log('✅ Class assignments sent, count:', assignments.length);
+    res.json(assignments);
+  } catch (error) {
+    console.error('❌ Get class assignments error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get class announcements
+app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) => {
+  try {
+    console.log('📢 Class announcements requested by:', req.user.email);
+    
+    const classItem = await Class.findById(req.params.id);
+    if (!classItem) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+
+    // Check access
+    if (req.user.role !== 'admin') {
+      const hasAccess = classItem.teachers.some(teacherId => 
+        teacherId.toString() === req.user.userId
+      ) || classItem.students.some(studentId => 
+        studentId.toString() === req.user.userId
+      );
+      
+      if (!hasAccess) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    const announcements = await Announcement.find({ 
+      $or: [
+        { class: req.params.id },
+        { isGlobal: true }
+      ]
+    })
+      .populate('author', 'name')
+      .populate('class', 'name')
+      .sort({ createdAt: -1 });
+
+    console.log('✅ Class announcements sent, count:', announcements.length);
+    res.json(announcements);
+  } catch (error) {
+    console.error('❌ Get class announcements error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -617,13 +786,33 @@ app.get('/api/announcements', async (req, res) => {
   }
 });
 
-app.post('/api/announcements', authenticateToken, async (req, res) => {
+app.post('/api/announcements', authenticateToken, checkClassAccess, async (req, res) => {
   try {
     console.log('📢 Create announcement by:', req.user.email);
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Teacher or admin access required' });
     }
+    
     const { title, content, isGlobal, classId } = req.body;
+    
+    // Check if teacher has access to the class (if not global)
+    if (!isGlobal && classId) {
+      const classItem = await Class.findById(classId);
+      if (!classItem) {
+        return res.status(404).json({ error: 'Class not found' });
+      }
+      
+      if (req.user.role !== 'admin') {
+        const isTeacherOfClass = classItem.teachers.some(teacherId => 
+          teacherId.toString() === req.user.userId
+        );
+        
+        if (!isTeacherOfClass) {
+          return res.status(403).json({ error: 'Access denied - not a teacher of this class' });
+        }
+      }
+    }
+    
     const announcement = new Announcement({
       title,
       content,
@@ -641,12 +830,9 @@ app.post('/api/announcements', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
+app.delete('/api/announcements/:id', authenticateToken, checkResourceOwnership, async (req, res) => {
   try {
     console.log('🗑️ Delete announcement by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
     await Announcement.findByIdAndDelete(req.params.id);
     console.log('✅ Announcement deleted:', req.params.id);
     res.json({ message: 'Announcement deleted' });
@@ -660,10 +846,30 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
 app.get('/api/assignments', authenticateToken, async (req, res) => {
   try {
     console.log('📚 Assignments requested by:', req.user.email);
-    const assignments = await Assignment.find()
-      .populate('class', 'name')
-      .populate('teacher', 'name')
-      .sort({ dueDate: 1 });
+    
+    let assignments;
+    if (req.user.role === 'admin') {
+      assignments = await Assignment.find()
+        .populate('class', 'name')
+        .populate('teacher', 'name')
+        .sort({ dueDate: 1 });
+    } else if (req.user.role === 'teacher') {
+      // Teachers see assignments they created
+      assignments = await Assignment.find({ teacher: req.user.userId })
+        .populate('class', 'name')
+        .populate('teacher', 'name')
+        .sort({ dueDate: 1 });
+    } else {
+      // Students see assignments for their classes
+      const userClasses = await Class.find({ students: req.user.userId });
+      const classIds = userClasses.map(c => c._id);
+      
+      assignments = await Assignment.find({ class: { $in: classIds } })
+        .populate('class', 'name')
+        .populate('teacher', 'name')
+        .sort({ dueDate: 1 });
+    }
+    
     console.log('✅ Assignments sent, count:', assignments.length);
     res.json(assignments);
   } catch (error) {
@@ -672,13 +878,31 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/assignments', authenticateToken, async (req, res) => {
+app.post('/api/assignments', authenticateToken, checkClassAccess, async (req, res) => {
   try {
     console.log('📚 Create assignment by:', req.user.email);
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Teacher or admin access required' });
     }
+    
     const { title, description, classId, dueDate } = req.body;
+    
+    // Check if teacher has access to the class
+    const classItem = await Class.findById(classId);
+    if (!classItem) {
+      return res.status(404).json({ error: 'Class not found' });
+    }
+    
+    if (req.user.role !== 'admin') {
+      const isTeacherOfClass = classItem.teachers.some(teacherId => 
+        teacherId.toString() === req.user.userId
+      );
+      
+      if (!isTeacherOfClass) {
+        return res.status(403).json({ error: 'Access denied - not a teacher of this class' });
+      }
+    }
+    
     const assignment = new Assignment({
       title,
       description,
@@ -713,6 +937,18 @@ app.post('/api/assignments/submit', authenticateToken, upload.single('file'), as
     const assignment = await Assignment.findById(assignmentId);
     if (!assignment) {
       return res.status(404).json({ error: 'Assignment not found' });
+    }
+
+    // Check if student is in the class
+    if (req.user.role === 'student') {
+      const classItem = await Class.findById(assignment.class);
+      const isStudentInClass = classItem.students.some(studentId => 
+        studentId.toString() === req.user.userId
+      );
+      
+      if (!isStudentInClass) {
+        return res.status(403).json({ error: 'Access denied - not a student in this class' });
+      }
     }
 
     // Check if student already submitted
@@ -765,8 +1001,8 @@ app.get('/api/assignments/:id/submissions', authenticateToken, async (req, res) 
       return res.status(404).json({ error: 'Assignment not found' });
     }
 
-    // Only teacher or admin can view submissions
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+    // Only teacher of this assignment or admin can view submissions
+    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -792,8 +1028,8 @@ app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Assignment not found' });
     }
 
-    // Only teacher or admin can grade
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+    // Only teacher of this assignment or admin can grade
+    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -816,12 +1052,9 @@ app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
   }
 });
 
-app.delete('/api/assignments/:id', authenticateToken, async (req, res) => {
+app.delete('/api/assignments/:id', authenticateToken, checkResourceOwnership, async (req, res) => {
   try {
     console.log('🗑️ Delete assignment by:', req.user.email);
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Teacher or admin access required' });
-    }
     await Assignment.findByIdAndDelete(req.params.id);
     console.log('✅ Assignment deleted:', req.params.id);
     res.json({ message: 'Assignment deleted' });
