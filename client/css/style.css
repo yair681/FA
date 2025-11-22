@@ -176,9 +176,9 @@ main {
     font-size: 0.8rem;
 }
 
-/* Homepage Hero */
-.hero {
-    background: linear-gradient(135deg, var(--primary), var(--dark));
+/* Homepage Updates */
+.recruitment-section {
+    background: linear-gradient(135deg, var(--secondary), var(--primary));
     color: white;
     padding: 3rem 2rem;
     border-radius: 8px;
@@ -186,14 +186,22 @@ main {
     margin-bottom: 2rem;
 }
 
-.hero h2 {
-    font-size: 2.5rem;
+.recruitment-section h3 {
+    font-size: 2rem;
     margin-bottom: 1rem;
 }
 
-.hero p {
+.recruitment-section p {
     font-size: 1.2rem;
     margin-bottom: 1.5rem;
+}
+
+.recruitment-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 1.5rem;
 }
 
 /* Announcements */
@@ -235,6 +243,15 @@ main {
     gap: 10px;
 }
 
+.announcement-content ul {
+    margin-right: 1.5rem;
+    margin-top: 0.5rem;
+}
+
+.announcement-content li {
+    margin-bottom: 0.5rem;
+}
+
 /* Forms */
 .form-group {
     margin-bottom: 1rem;
@@ -261,6 +278,144 @@ textarea {
 
 select[multiple] {
     height: 120px;
+}
+
+/* File Upload Styles */
+.file-upload {
+    border: 2px dashed #ddd;
+    border-radius: 8px;
+    padding: 2rem;
+    text-align: center;
+    margin-bottom: 1rem;
+    transition: border-color 0.3s;
+    cursor: pointer;
+}
+
+.file-upload:hover {
+    border-color: var(--primary);
+}
+
+.file-upload.dragover {
+    border-color: var(--primary);
+    background-color: rgba(52, 152, 219, 0.1);
+}
+
+.file-preview {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.file-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.file-icon {
+    font-size: 1.5rem;
+    color: var(--primary);
+}
+
+.file-details h4 {
+    margin: 0;
+    color: var(--dark);
+}
+
+.file-details p {
+    margin: 0;
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.file-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Submission Items */
+.submission-item {
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    background: white;
+}
+
+.submission-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.submission-student {
+    font-weight: bold;
+    color: var(--dark);
+}
+
+.submission-date {
+    color: var(--gray);
+    font-size: 0.9rem;
+}
+
+.submission-content {
+    margin-bottom: 1rem;
+}
+
+.submission-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--dark);
+    border: 1px solid #ddd;
+    transition: all 0.3s;
+}
+
+.submission-file:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+}
+
+.grade-input {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 0.5rem;
+}
+
+.grade-input input {
+    width: 80px;
+    margin: 0;
+}
+
+/* Media Upload Improvements */
+.upload-preview {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.upload-preview img, .upload-preview video {
+    max-width: 100%;
+    max-height: 200px;
+    border-radius: 8px;
+}
+
+/* Class Management */
+.class-management-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
 }
 
 /* Tables */
@@ -415,8 +570,8 @@ footer {
         margin-top: 1rem;
     }
     
-    .hero h2 {
-        font-size: 2rem;
+    .recruitment-section h3 {
+        font-size: 1.5rem;
     }
     
     .card-header {
@@ -427,5 +582,30 @@ footer {
     
     .media-grid {
         grid-template-columns: 1fr;
+    }
+    
+    .submission-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .grade-input {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .recruitment-buttons {
+        flex-direction: column;
+    }
+    
+    .class-management-actions {
+        flex-direction: column;
+    }
+    
+    .file-preview {
+        flex-direction: column;
+        gap: 1rem;
+        text-align: center;
     }
 }
