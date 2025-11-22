@@ -194,7 +194,17 @@ class DatabaseManager {
             console.log('🔒 Authentication required for assignments');
             return [];
         }
-        return this.makeRequest('/assignments');
+        
+        try {
+            console.log('📚 Fetching assignments for user:', authManager.currentUser?.email);
+            const assignments = await this.makeRequest('/assignments');
+            console.log('✅ Assignments fetched successfully, count:', assignments?.length || 0);
+            return assignments || [];
+        } catch (error) {
+            console.error('❌ Error getting assignments:', error);
+            // Return empty array instead of throwing error for better UX
+            return [];
+        }
     }
 
     async createAssignment(assignmentData) {
