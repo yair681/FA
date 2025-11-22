@@ -117,6 +117,13 @@ class DatabaseManager {
         return this.makeRequest('/classes');
     }
 
+    async getUserClasses() {
+        if (!authManager || !authManager.isAuthenticated()) {
+            return [];
+        }
+        return this.makeRequest('/classes');
+    }
+
     async createClass(classData) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
@@ -134,6 +141,21 @@ class DatabaseManager {
         return this.makeRequest(`/classes/${classId}`, {
             method: 'DELETE'
         });
+    }
+
+    // ===== CLASS-SPECIFIC DATA =====
+    async getClassAssignments(classId) {
+        if (!authManager || !authManager.isAuthenticated()) {
+            throw new Error('Authentication required');
+        }
+        return this.makeRequest(`/classes/${classId}/assignments`);
+    }
+
+    async getClassAnnouncements(classId) {
+        if (!authManager || !authManager.isAuthenticated()) {
+            throw new Error('Authentication required');
+        }
+        return this.makeRequest(`/classes/${classId}/announcements`);
     }
 
     // ===== ANNOUNCEMENTS =====
@@ -261,13 +283,6 @@ class DatabaseManager {
             console.error('Error getting teachers:', error);
             return [];
         }
-    }
-
-    async getUserClasses() {
-        if (!authManager || !authManager.isAuthenticated()) {
-            return [];
-        }
-        return this.makeRequest('/classes');
     }
 
     // ===== CHECK API HEALTH =====
