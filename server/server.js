@@ -628,23 +628,29 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
 // Assignments routes
 app.get('/api/assignments', authenticateToken, async (req, res) => {
   try {
-    console.log('📚 Assignments requested by:', req.user.email);
+    console.log('📚 Assignments requested by:', req.user.email, 'role:', req.user.role);
     
     let assignments;
     if (req.user.role === 'student') {
       // For students, only show assignments for their classes
       const user = await User.findById(req.user.userId).populate('classes');
       const classIds = user.classes.map(c => c._id);
+      console.log('🎒 Student classes:', classIds);
+      
       assignments = await Assignment.find({ class: { $in: classIds } })
         .populate('class', 'name')
         .populate('teacher', 'name')
         .sort({ dueDate: 1 });
+        
+      console.log('📝 Student assignments found:', assignments.length);
     } else {
       // For teachers/admins, show all assignments
       assignments = await Assignment.find()
         .populate('class', 'name')
         .populate('teacher', 'name')
         .sort({ dueDate: 1 });
+        
+      console.log('👨‍🏫 Teacher/admin assignments found:', assignments.length);
     }
     
     console.log('✅ Assignments sent, count:', assignments.length);
