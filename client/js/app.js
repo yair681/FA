@@ -6,6 +6,7 @@ function updateUI() {
     const logoutBtn = document.getElementById('logout-btn');
     const settingsLink = document.getElementById('settings-link');
     const adminLink = document.getElementById('admin-link');
+    const assignmentsLink = document.getElementById('assignments-link');
 
     console.log('🔄 Updating UI for user:', user ? user.name : 'Guest');
 
@@ -14,6 +15,7 @@ function updateUI() {
         loginBtn.style.display = 'none';
         logoutBtn.style.display = 'inline-block';
         settingsLink.style.display = 'block';
+        assignmentsLink.style.display = 'block'; // Show assignments link for logged-in users
 
         // Show admin link for admin users
         if (user.role === 'admin') {
@@ -49,12 +51,25 @@ function updateUI() {
         if (teacherSection) {
             teacherSection.style.display = isTeacher ? 'block' : 'none';
         }
+
+        // Show student assignments section for students
+        const studentSection = document.getElementById('student-assignments-section');
+        if (studentSection) {
+            studentSection.style.display = authManager.isStudent() ? 'block' : 'none';
+        }
+
+        // Hide guest message for logged-in users
+        const guestSection = document.getElementById('guest-assignments-section');
+        if (guestSection) {
+            guestSection.style.display = 'none';
+        }
     } else {
         userDisplay.textContent = 'אורח';
         loginBtn.style.display = 'inline-block';
         logoutBtn.style.display = 'none';
         settingsLink.style.display = 'none';
         adminLink.style.display = 'none';
+        assignmentsLink.style.display = 'none'; // Hide assignments link for guests
 
         // Hide all teacher/admin buttons
         const addButtons = document.querySelectorAll('[id*="add-"]');
@@ -67,6 +82,17 @@ function updateUI() {
         const teacherSection = document.getElementById('teacher-assignments-section');
         if (teacherSection) {
             teacherSection.style.display = 'none';
+        }
+
+        const studentSection = document.getElementById('student-assignments-section');
+        if (studentSection) {
+            studentSection.style.display = 'none';
+        }
+
+        // Show guest message for assignments page
+        const guestSection = document.getElementById('guest-assignments-section');
+        if (guestSection) {
+            guestSection.style.display = 'block';
         }
     }
 
@@ -133,3 +159,4 @@ window.addEventListener('error', function(e) {
 window.addEventListener('unhandledrejection', function(e) {
     console.error('Unhandled promise rejection:', e.reason);
 });
+
