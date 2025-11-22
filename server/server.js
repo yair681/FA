@@ -6,8 +6,8 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer'; // חובה: טיפול בקבצים
-import fs from 'fs'; // חובה: ניהול תיקיות
+import multer from 'multer'; // ✅ ADDED: לטיפול בהעלאת קבצים
+import fs from 'fs'; // ✅ ADDED: לניהול תיקיות
 
 // Fix for __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -23,7 +23,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 app.use(cors());
 app.use(express.json());
 
-// ✅ הגדרת העלאת קבצים (Multer)
+// ✅ הגדרת העלאת קבצים (Multer) - אחסון מקומי
 const uploadDir = path.join(__dirname, 'uploads');
 // יצירת התיקייה אם היא לא קיימת
 if (!fs.existsSync(uploadDir)) {
@@ -35,9 +35,7 @@ const storage = multer.diskStorage({
         cb(null, uploadDir)
     },
     filename: function (req, file, cb) {
-        // יצירת שם ייחודי לקובץ (מונע דריסת קבצים)
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        // המרת השם לאנגלית בלבד כדי למנוע בעיות קידוד
         const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
         cb(null, uniqueSuffix + '-' + cleanName);
     }
@@ -49,12 +47,10 @@ const upload = multer({
 });
 
 // ✅ חשיפת הקבצים הסטטיים
-// הלקוח (האתר)
 app.use(express.static(path.join(__dirname, '..', 'client')));
-// קבצי CSS/JS
 app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
 app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
-// קבצים שהועלו (תמונות/סרטונים/משימות)
+// ✅ חשיפת תיקיית ההעלאות
 app.use('/uploads', express.static(uploadDir));
 
 
@@ -63,7 +59,7 @@ const MONGODB_URI = process.env.MONGODB_URI;
 
 console.log('🔗 Connecting to MongoDB...');
 
-// סכמות MongoDB (נשמרו מהקוד המקורי)
+// סכמות MongoDB
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -115,12 +111,13 @@ const eventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// ✅ FIXED: Media Schema - date is no longer required, uses default
 const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, enum: ['image', 'video'], required: true },
   url: { type: String, required: true },
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  date: { type: Date, required: true },
+  date: { type: Date, default: Date.now }, 
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -132,7 +129,7 @@ const Assignment = mongoose.model('Assignment', assignmentSchema);
 const Event = mongoose.model('Event', eventSchema);
 const Media = mongoose.model('Media', mediaSchema);
 
-// יצירת משתמשים ברירת מחדל
+// יצירת משתמש מנהל ברירת מחדל
 async function createDefaultUsers() {
   try {
     const existingAdmin = await User.findOne({ email: 'yairfrish2@gmail.com' });
@@ -147,7 +144,7 @@ async function createDefaultUsers() {
         createdAt: new Date()
       });
       await adminUser.save();
-      console.log('✅ Default admin user created');
+      console.log('✅ Default admin user created: yairfrish2@gmail.com / yair12345');
     }
   } catch (error) {
     console.error('❌ Error creating default users:', error);
@@ -214,19 +211,47 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
+// ✅ FIXED: Login Route - Added detailed error logging to find 500 issue
 app.post('/api/login', async (req, res) => {
   try {
+    console.log('🔐 Login Attempt:', req.body.email); 
+    
     const { email, password } = req.body;
+    
+    if (!email || !password) {
+        console.log('❌ Missing email or password');
+        return res.status(400).json({ error: 'Email and password are required' });
+    }
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ error: 'Invalid email or password' });
+    if (!user) {
+        console.log('❌ User not found in DB:', email);
+        return res.status(400).json({ error: 'Invalid email or password' });
+    }
+
+    if (!user.password) {
+        console.error('❌ Error: User found but has no password field');
+        return res.status(500).json({ error: 'User data corrupted' });
+    }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) return res.status(400).json({ error: 'Invalid email or password' });
+    if (!isPasswordValid) {
+        console.log('❌ Password mismatch for:', email);
+        return res.status(400).json({ error: 'Invalid email or password' });
+    }
 
     const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
-    res.json({ message: 'Login successful', token, user: { id: user._id, name, email, role } });
+    
+    console.log('✅ Login successful:', email);
+    res.json({ 
+        message: 'Login successful', 
+        token, 
+        user: { id: user._id, name: user.name, email: user.email, role: user.role } 
+    });
+
   } catch (error) {
-    res.status(500).json({ error: 'Error logging in' });
+    console.error('🔥 Login Critical Error:', error);
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -362,12 +387,12 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
-// Assignments - ✅ FIXED: Student View Logic
+// ✅ FIXED: Assignments - Student View Logic
 app.get('/api/assignments', authenticateToken, async (req, res) => {
     try {
         let assignments;
         if (req.user.role === 'student') {
-            // חיפוש כיתות שהתלמיד רשום בהן ב-Class collection
+            // FIX: חיפוש כיתות שהתלמיד רשום בהן ב-Class collection
             const studentClasses = await Class.find({ students: req.user.userId });
             const classIds = studentClasses.map(c => c._id);
             
@@ -407,28 +432,25 @@ app.post('/api/assignments/submit', authenticateToken, upload.single('file'), as
     try {
         const { assignmentId, submission } = req.body;
         
-        // מציאת המשימה
         const assignment = await Assignment.findById(assignmentId);
         if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
 
-        // הכנת הנתונים להגשה
         let fileUrl = null;
         if (req.file) {
             fileUrl = `/uploads/${req.file.filename}`;
         }
 
-        // בדיקה אם כבר קיימת הגשה
         const existingSubIndex = assignment.submissions.findIndex(s => s.student.toString() === req.user.userId);
         
         const newSubmission = {
             student: req.user.userId,
             submission: submission || '',
-            fileUrl: fileUrl, // שמירת נתיב הקובץ אם קיים
+            fileUrl: fileUrl, 
             submittedAt: new Date()
         };
 
         if (existingSubIndex > -1) {
-            // עדכון הגשה קיימת - שומרים על הקובץ הישן אם לא הועלה חדש
+            // עדכון הגשה קיימת
             if (!fileUrl && assignment.submissions[existingSubIndex].fileUrl) {
                 newSubmission.fileUrl = assignment.submissions[existingSubIndex].fileUrl;
             }
@@ -501,39 +523,46 @@ app.delete('/api/events/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
-// Media - ✅ FIXED: Upload Logic (500 Error Fix)
+// Media
 app.get('/api/media', async (req, res) => {
     const media = await Media.find().populate('author', 'name').sort({ createdAt: -1 });
     res.json(media);
 });
 
+// ✅ FIXED: Media POST Route - Handles Multer and Date
 app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
     try {
-        if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
         
-        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
 
         const { title, type, date } = req.body;
         const fileUrl = `/uploads/${req.file.filename}`;
+        const mediaDate = date || new Date(); 
 
         const media = new Media({ 
-            title, 
+            title: title || 'ללא כותרת', 
             type, 
             url: fileUrl, 
-            date, 
+            date: mediaDate, 
             author: req.user.userId 
         });
+        
         await media.save();
         res.json(media);
     } catch (error) {
         console.error('Upload Error:', error);
-        res.status(500).json({ error: 'Error uploading media' });
+        res.status(500).json({ error: 'Error uploading media: ' + error.message });
     }
 });
 
 app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    // אופציונלי: מחיקת הקובץ הפיזי מהשרת כאן (דורש שליפת ה-URL קודם)
+    // אופציונלי: מחיקת הקובץ הפיזי מהשרת כאן
     await Media.findByIdAndDelete(req.params.id);
     res.json({ message: 'Deleted' });
 });
