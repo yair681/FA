@@ -21,7 +21,7 @@
                     <li><a href="#" class="nav-link active" data-page="home">דף הבית</a></li>
                     <li><a href="#" class="nav-link" data-page="announcements">הודעות</a></li>
                     <li><a href="#" class="nav-link" data-page="classes">כיתות</a></li>
-                    <li><a href="#" class="nav-link" data-page="assignments">משימות</a></li>
+                    <li><a href="#" class="nav-link" data-page="assignments" id="assignments-link">משימות</a></li>
                     <li><a href="#" class="nav-link" data-page="events">אירועים</a></li>
                     <li><a href="#" class="nav-link" data-page="history">מה היה לנו עד כה</a></li>
                     <li><a href="#" class="nav-link" data-page="settings" id="settings-link" style="display:none;">הגדרות</a></li>
@@ -127,6 +127,19 @@
                         
                         <div id="teacher-assignments-list">
                             <div class="loading">טוען משימות...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Guest Message - Visible only to guests -->
+                <div id="guest-assignments-section" style="display:none;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 class="card-title">גישה למשימות</h2>
+                        </div>
+                        <div class="announcement-content">
+                            <p>על מנת לצפות במשימות ולהגיש אותן, יש להתחבר למערכת כמשתמש רשום.</p>
+                            <button class="btn" onclick="uiManager.openLoginModal()" style="margin-top: 1rem;">התחברות למערכת</button>
                         </div>
                     </div>
                 </div>
