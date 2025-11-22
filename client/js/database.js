@@ -207,6 +207,17 @@ class DatabaseManager {
         });
     }
 
+    // 🔥 NEW: Update assignment function
+    async updateAssignment(assignmentId, assignmentData) {
+        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+            throw new Error('Teacher or admin access required');
+        }
+        return this.makeRequest(`/assignments/${assignmentId}`, {
+            method: 'PUT',
+            body: JSON.stringify(assignmentData)
+        });
+    }
+
     async deleteAssignment(assignmentId) {
         if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
