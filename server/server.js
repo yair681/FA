@@ -204,6 +204,64 @@ async function createSampleData() {
       console.log(`✅ Already have ${announcementsCount} announcements`);
     }
 
+    // 🔥 NEW: Create sample assignments
+    const assignmentsCount = await Assignment.countDocuments();
+    if (assignmentsCount === 0) {
+      console.log('📚 Creating sample assignments...');
+      
+      // Find a class and teacher
+      const teacher = await User.findOne({ email: 'teacher@school.com' });
+      const student = await User.findOne({ email: 'student@school.com' });
+      
+      if (teacher) {
+        // Create a sample class
+        const sampleClass = new Class({
+          name: 'כיתה ז1',
+          teacher: teacher._id,
+          teachers: [teacher._id],
+          students: student ? [student._id] : []
+        });
+        await sampleClass.save();
+        
+        // Create sample assignments
+        const sampleAssignments = [
+          {
+            title: 'משימה במתמטיקה - שברים',
+            description: 'פתרו את התרגילים בעמוד 45 במחברת.',
+            class: sampleClass._id,
+            teacher: teacher._id,
+            dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Due in 7 days
+            submissions: []
+          },
+          {
+            title: 'עבודה בהיסטוריה - תקופת בית שני',
+            description: 'כתבו עבודה על חיי היום-יום בתקופת בית השני.',
+            class: sampleClass._id,
+            teacher: teacher._id,
+            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // Due in 14 days
+            submissions: []
+          }
+        ];
+        
+        await Assignment.insertMany(sampleAssignments);
+        console.log('✅ Sample assignments created');
+        
+        // Add class to student if exists
+        if (student) {
+          student.classes.push(sampleClass._id);
+          await student.save();
+          console.log('✅ Added sample class to student');
+        }
+        
+        // Add class to teacher
+        teacher.classes.push(sampleClass._id);
+        await teacher.save();
+        console.log('✅ Added sample class to teacher');
+      }
+    } else {
+      console.log(`✅ Already have ${assignmentsCount} assignments`);
+    }
+
   } catch (error) {
     console.error('❌ Error creating sample data:', error);
   }
@@ -625,7 +683,7 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Assignments routes
+// 🔥 FIXED: Assignments routes - עם יותר logging ודיבאג
 app.get('/api/assignments', authenticateToken, async (req, res) => {
   try {
     console.log('📚 Assignments requested by:', req.user.email, 'role:', req.user.role);
@@ -633,15 +691,24 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
     let assignments;
     if (req.user.role === 'student') {
       // For students, only show assignments for their classes
+      console.log('🎒 Looking up student data...');
       const user = await User.findById(req.user.userId).populate('classes');
-      const classIds = user.classes.map(c => c._id);
-      console.log('🎒 Student classes:', classIds);
+      console.log('🎒 Student found:', user?.email);
+      console.log('🎒 Student classes:', user?.classes);
       
-      assignments = await Assignment.find({ class: { $in: classIds } })
-        .populate('class', 'name')
-        .populate('teacher', 'name')
-        .sort({ dueDate: 1 });
-        
+      const classIds = user.classes.map(c => c._id);
+      console.log('🎒 Student class IDs:', classIds);
+      
+      if (classIds.length === 0) {
+        console.log('🎒 Student has no classes assigned');
+        assignments = [];
+      } else {
+        assignments = await Assignment.find({ class: { $in: classIds } })
+          .populate('class', 'name')
+          .populate('teacher', 'name')
+          .sort({ dueDate: 1 });
+      }
+      
       console.log('📝 Student assignments found:', assignments.length);
     } else {
       // For teachers/admins, show all assignments
