@@ -325,9 +325,13 @@ class UIManager {
             return;
         }
 
-        container.innerHTML = announcements.map(announcement => `
+        container.innerHTML = announcements.map(announcement => {
+            const canDelete = authManager.isAdmin() || 
+                (authManager.isTeacher() && announcement.author?._id === authManager.currentUser.id);
+            
+            return `
             <div class="announcement">
-                ${showActions && authManager.isTeacher() ? `
+                ${showActions && canDelete ? `
                     <div class="announcement-actions">
                         <button class="btn btn-danger btn-sm" onclick="uiManager.deleteAnnouncement('${announcement._id}')">
                             <i class="fas fa-trash"></i>
@@ -348,7 +352,7 @@ class UIManager {
                     </span>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     renderClasses(classes, containerId) {
@@ -359,7 +363,11 @@ class UIManager {
             return;
         }
 
-        container.innerHTML = classes.map(classItem => `
+        container.innerHTML = classes.map(classItem => {
+            const isTeacherOfClass = authManager.isAdmin() || 
+                classItem.teachers?.some(t => t._id === authManager.currentUser.id);
+            
+            return `
             <div class="announcement">
                 <div class="announcement-header">
                     <div class="announcement-title">${classItem.name}</div>
@@ -367,16 +375,16 @@ class UIManager {
                 <div class="announcement-content">
                     <p><strong>מספר תלמידים:</strong> ${classItem.students?.length || 0}</p>
                     <p><strong>מספר מורים:</strong> ${classItem.teachers?.length || 0}</p>
-                    <div class="class-management-actions">
-                        ${authManager.isTeacher() ? `
+                    ${isTeacherOfClass ? `
+                        <div class="class-management-actions">
                             <button class="btn btn-secondary" onclick="uiManager.manageClass('${classItem._id}')">ניהול כיתה</button>
                             <button class="btn" onclick="uiManager.viewClassStudents('${classItem._id}')">צפייה בתלמידים</button>
                             <button class="btn btn-warning" onclick="uiManager.editClass('${classItem._id}')">עריכת כיתה</button>
-                        ` : ''}
-                    </div>
+                        </div>
+                    ` : ''}
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     renderAssignments(assignments, containerId) {
@@ -434,6 +442,7 @@ class UIManager {
         container.innerHTML = assignments.map(assignment => {
             const submissionCount = assignment.submissions?.length || 0;
             const gradedCount = assignment.submissions?.filter(s => s.grade).length || 0;
+            const canDelete = authManager.isAdmin() || assignment.teacher?._id === authManager.currentUser.id;
             
             return `
             <div class="announcement">
@@ -448,8 +457,10 @@ class UIManager {
                 </div>
                 <div style="margin-top: 1rem;">
                     <button class="btn" onclick="uiManager.viewSubmissions('${assignment._id}')">צפייה בהגשות</button>
-                    <button class="btn btn-warning" onclick="uiManager.editAssignment('${assignment._id}')" style="margin-right:0.5rem;">עריכה</button>
-                    <button class="btn btn-danger" onclick="uiManager.deleteAssignment('${assignment._id}')" style="margin-right:0.5rem;">מחיקה</button>
+                    ${canDelete ? `
+                        <button class="btn btn-warning" onclick="uiManager.editAssignment('${assignment._id}')" style="margin-right:0.5rem;">עריכה</button>
+                        <button class="btn btn-danger" onclick="uiManager.deleteAssignment('${assignment._id}')" style="margin-right:0.5rem;">מחיקה</button>
+                    ` : ''}
                 </div>
             </div>
         `}).join('');
@@ -609,11 +620,15 @@ class UIManager {
         const modal = document.getElementById('add-announcement-modal');
         modal.style.display = 'flex';
         
-        // Populate classes dropdown if user is teacher
+        // Populate classes dropdown only with classes the teacher has access to
         if (authManager.isTeacher()) {
             const classes = await dbManager.getUserClasses();
+            const teacherClasses = classes.filter(c => 
+                c.teachers?.some(t => t._id === authManager.currentUser.id) || authManager.isAdmin()
+            );
+            
             const classSelect = document.getElementById('announcement-class');
-            classSelect.innerHTML = classes.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+            classSelect.innerHTML = teacherClasses.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
         }
         
         document.getElementById('add-announcement-form').onsubmit = (e) => this.handleAddAnnouncement(e);
@@ -628,10 +643,14 @@ class UIManager {
         const modal = document.getElementById('add-assignment-modal');
         modal.style.display = 'flex';
         
-        // Populate classes dropdown
+        // Populate classes dropdown only with classes the teacher has access to
         const classes = await dbManager.getUserClasses();
+        const teacherClasses = classes.filter(c => 
+            c.teachers?.some(t => t._id === authManager.currentUser.id) || authManager.isAdmin()
+        );
+        
         const classSelect = document.getElementById('assignment-class');
-        classSelect.innerHTML = classes.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+        classSelect.innerHTML = teacherClasses.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
         
         document.getElementById('add-assignment-form').onsubmit = (e) => this.handleAddAssignment(e);
     }
@@ -1252,11 +1271,132 @@ class UIManager {
     }
 
     async viewClassAssignments(classId) {
-        this.showSuccess('פונקציונליות צפייה במשימות הכיתה תיושם בגרסה הבאה');
+        try {
+            const response = await fetch(`/api/classes/${classId}/assignments`, {
+                headers: authManager.getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const assignments = await response.json();
+                this.showClassAssignmentsModal(assignments, classId);
+            } else {
+                this.showError('שגיאה בטעינת משימות הכיתה');
+            }
+        } catch (error) {
+            this.showError('שגיאה בטעינת משימות הכיתה: ' + error.message);
+        }
+    }
+
+    showClassAssignmentsModal(assignments, classId) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2>משימות הכיתה</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="assignments-list">
+                    ${assignments.length === 0 ? '<p>אין משימות בכיתה זו</p>' : ''}
+                    ${assignments.map(assignment => {
+                        const submissionCount = assignment.submissions?.length || 0;
+                        const gradedCount = assignment.submissions?.filter(s => s.grade).length || 0;
+                        
+                        return `
+                        <div class="announcement">
+                            <div class="announcement-header">
+                                <div class="announcement-title">${assignment.title}</div>
+                                <div class="announcement-date">תאריך הגשה: ${this.formatDate(assignment.dueDate)}</div>
+                            </div>
+                            <div class="announcement-content">${assignment.description}</div>
+                            <div class="announcement-content">
+                                <strong>מספר הגשות:</strong> ${submissionCount} | 
+                                <strong>מספר ציונים:</strong> ${gradedCount}
+                            </div>
+                            <div style="margin-top: 1rem;">
+                                <button class="btn" onclick="uiManager.viewSubmissions('${assignment._id}')">צפייה בהגשות</button>
+                            </div>
+                        </div>
+                    `}).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.querySelector('.close-modal').onclick = () => {
+            document.body.removeChild(modal);
+        };
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        };
     }
 
     async viewClassAnnouncements(classId) {
-        this.showSuccess('פונקציונליות צפייה בהודעות הכיתה תיושם בגרסה הבאה');
+        try {
+            const response = await fetch(`/api/classes/${classId}/announcements`, {
+                headers: authManager.getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const announcements = await response.json();
+                this.showClassAnnouncementsModal(announcements, classId);
+            } else {
+                this.showError('שגיאה בטעינת הודעות הכיתה');
+            }
+        } catch (error) {
+            this.showError('שגיאה בטעינת הודעות הכיתה: ' + error.message);
+        }
+    }
+
+    showClassAnnouncementsModal(announcements, classId) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2>הודעות הכיתה</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="announcements-list">
+                    ${announcements.length === 0 ? '<p>אין הודעות בכיתה זו</p>' : ''}
+                    ${announcements.map(announcement => `
+                        <div class="announcement">
+                            <div class="announcement-header">
+                                <div class="announcement-title">${announcement.title}</div>
+                                <div class="announcement-date">${this.formatDate(announcement.createdAt)}</div>
+                            </div>
+                            <div class="announcement-content">${announcement.content}</div>
+                            <div class="announcement-meta">
+                                <span class="badge ${announcement.isGlobal ? 'badge-primary' : 'badge-secondary'}">
+                                    ${announcement.isGlobal ? 'הודעה כללית' : 'הודעה לכיתה'}
+                                </span>
+                                <span style="margin-right: 10px; color: var(--gray); font-size: 0.9rem;">
+                                    ${announcement.author?.name || 'מערכת'}
+                                </span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.querySelector('.close-modal').onclick = () => {
+            document.body.removeChild(modal);
+        };
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        };
     }
 
     async editUser(userId) {
