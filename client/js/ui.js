@@ -262,8 +262,10 @@ class UIManager {
 
     async loadAssignmentsPage() {
         if (!authManager.currentUser) {
-            document.getElementById('assignments-list').innerHTML = '<p>יש להתחבר כדי לצפות במשימות</p>';
-            document.getElementById('teacher-assignments-list').innerHTML = '<p>יש להתחבר כדי לצפות במשימות</p>';
+            // Show guest message - no assignments data needed
+            document.getElementById('guest-assignments-section').style.display = 'block';
+            document.getElementById('student-assignments-section').style.display = 'none';
+            document.getElementById('teacher-assignments-section').style.display = 'none';
             return;
         }
         
@@ -271,11 +273,17 @@ class UIManager {
         
         // Show student assignments only to students
         if (authManager.isStudent()) {
+            document.getElementById('student-assignments-section').style.display = 'block';
+            document.getElementById('teacher-assignments-section').style.display = 'none';
+            document.getElementById('guest-assignments-section').style.display = 'none';
             this.renderAssignments(assignments, 'assignments-list');
         }
 
         // Show teacher assignments only to teachers/admins
         if (authManager.isTeacher()) {
+            document.getElementById('teacher-assignments-section').style.display = 'block';
+            document.getElementById('student-assignments-section').style.display = 'none';
+            document.getElementById('guest-assignments-section').style.display = 'none';
             this.renderTeacherAssignments(assignments, 'teacher-assignments-list');
         }
     }
@@ -723,6 +731,106 @@ class UIManager {
         const modal = document.getElementById('add-media-modal');
         modal.style.display = 'flex';
         document.getElementById('add-media-form').onsubmit = (e) => this.handleAddMedia(e);
+    }
+
+    // 🔥 NEW: Edit Assignment Modal
+    async editAssignment(assignmentId) {
+        try {
+            // Get assignment details
+            const assignments = await dbManager.getAssignments();
+            const assignment = assignments.find(a => a._id === assignmentId);
+            
+            if (!assignment) {
+                this.showError('משימה לא נמצאה');
+                return;
+            }
+
+            // Check if user has permission to edit
+            if (!authManager.isAdmin() && assignment.teacher?._id !== authManager.currentUser.id) {
+                this.showError('אין לך הרשאה לערוך משימה זו');
+                return;
+            }
+
+            // Create edit assignment modal
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>עריכת משימה</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <form id="edit-assignment-form">
+                        <div class="form-group">
+                            <label for="edit-assignment-title">כותרת</label>
+                            <input type="text" id="edit-assignment-title" value="${assignment.title}" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="edit-assignment-description">תיאור</label>
+                            <textarea id="edit-assignment-description" required>${assignment.description}</textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="edit-assignment-due-date">תאריך הגשה</label>
+                            <input type="date" id="edit-assignment-due-date" value="${assignment.dueDate.split('T')[0]}" required>
+                        </div>
+                        
+                        <button type="submit" class="btn">עדכון משימה</button>
+                    </form>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            // Set up form submission
+            modal.querySelector('#edit-assignment-form').onsubmit = async (e) => {
+                e.preventDefault();
+                
+                const title = document.getElementById('edit-assignment-title').value;
+                const description = document.getElementById('edit-assignment-description').value;
+                const dueDate = document.getElementById('edit-assignment-due-date').value;
+                
+                try {
+                    // Update assignment
+                    const response = await fetch(`/api/assignments/${assignmentId}`, {
+                        method: 'PUT',
+                        headers: authManager.getAuthHeaders(),
+                        body: JSON.stringify({
+                            title,
+                            description,
+                            dueDate
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showSuccess('המשימה עודכנה בהצלחה');
+                        document.body.removeChild(modal);
+                        this.loadPageData('assignments');
+                    } else {
+                        const error = await response.json();
+                        this.showError('שגיאה בעדכון המשימה: ' + error.error);
+                    }
+                } catch (error) {
+                    this.showError('שגיאה בעדכון המשימה: ' + error.message);
+                }
+            };
+            
+            // Close modal handlers
+            modal.querySelector('.close-modal').onclick = () => {
+                document.body.removeChild(modal);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            };
+            
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי המשימה: ' + error.message);
+        }
     }
 
     // Handler functions
@@ -1539,10 +1647,6 @@ class UIManager {
         } catch (error) {
             this.showError('שגיאה בטעינת פרטי הכיתה: ' + error.message);
         }
-    }
-
-    async editAssignment(assignmentId) {
-        this.showSuccess('פונקציונליות עריכת משימה תיושם בגרסה הבאה');
     }
 
     // Utility functions
