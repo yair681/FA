@@ -1,6 +1,5 @@
 // Main application initialization
 function updateUI() {
-    // הפונקציה הזו כעת בטוחה מכיוון שהיא נקראת רק כאשר authManager קיים
     const user = authManager.currentUser;
     const userDisplay = document.getElementById('user-display');
     const loginBtn = document.getElementById('login-btn');
@@ -36,24 +35,34 @@ function updateUI() {
             'add-assignment-btn',
             'add-event-btn',
             'add-media-btn',
-            'admin-add-class-btn',
-            'add-user-btn'
+            'add-user-btn',
+            'admin-add-class-btn'
         ];
         
-        addButtons.forEach(id => {
-            const btn = document.getElementById(id);
+        addButtons.forEach(btnId => {
+            const btn = document.getElementById(btnId);
             if (btn) {
-                btn.style.display = isTeacher ? 'inline-block' : 'none';
+                btn.style.display = isTeacher ? 'block' : 'none';
             }
         });
-        
-        // Show/hide assignment sections
-        const teacherAssignmentsSection = document.getElementById('teacher-assignments-section');
-        const studentAssignmentsSection = document.getElementById('student-assignments-section');
-        
-        if (teacherAssignmentsSection) teacherAssignmentsSection.style.display = isTeacher ? 'block' : 'none';
-        if (studentAssignmentsSection) studentAssignmentsSection.style.display = !isTeacher ? 'block' : 'none';
-        
+
+        // Show teacher assignments section
+        const teacherSection = document.getElementById('teacher-assignments-section');
+        if (teacherSection) {
+            teacherSection.style.display = isTeacher ? 'block' : 'none';
+        }
+
+        // Show student assignments section for students
+        const studentSection = document.getElementById('student-assignments-section');
+        if (studentSection) {
+            studentSection.style.display = authManager.isStudent() ? 'block' : 'none';
+        }
+
+        // Hide guest message for logged-in users
+        const guestSection = document.getElementById('guest-assignments-section');
+        if (guestSection) {
+            guestSection.style.display = 'none';
+        }
     } else {
         userDisplay.textContent = 'אורח';
         loginBtn.style.display = 'inline-block';
@@ -61,70 +70,81 @@ function updateUI() {
         settingsLink.style.display = 'none';
         adminLink.style.display = 'none';
         assignmentsLink.style.display = 'none'; // Hide assignments link for guests
-        
-        // Hide teacher/admin buttons
-        const addButtons = [
-            'add-announcement-btn',
-            'add-global-announcement-btn', 
-            'add-class-btn',
-            'add-assignment-btn',
-            'add-event-btn',
-            'add-media-btn',
-            'admin-add-class-btn',
-            'add-user-btn'
-        ];
-        addButtons.forEach(id => {
-            const btn = document.getElementById(id);
-            if (btn) {
+
+        // Hide all teacher/admin buttons
+        const addButtons = document.querySelectorAll('[id*="add-"]');
+        addButtons.forEach(btn => {
+            if (btn.id.includes('add-') && btn.tagName === 'BUTTON') {
                 btn.style.display = 'none';
             }
         });
 
-        // Show guest assignment message
-        const guestAssignmentsSection = document.getElementById('guest-assignments-section');
-        if (guestAssignmentsSection) guestAssignmentsSection.style.display = 'block';
-        const teacherAssignmentsSection = document.getElementById('teacher-assignments-section');
-        if (teacherAssignmentsSection) teacherAssignmentsSection.style.display = 'none';
-        const studentAssignmentsSection = document.getElementById('student-assignments-section');
-        if (studentAssignmentsSection) studentAssignmentsSection.style.display = 'none';
+        const teacherSection = document.getElementById('teacher-assignments-section');
+        if (teacherSection) {
+            teacherSection.style.display = 'none';
+        }
+
+        const studentSection = document.getElementById('student-assignments-section');
+        if (studentSection) {
+            studentSection.style.display = 'none';
+        }
+
+        // Show guest message for assignments page
+        const guestSection = document.getElementById('guest-assignments-section');
+        if (guestSection) {
+            guestSection.style.display = 'block';
+        }
+    }
+
+    // 🔥 FIX: Always reload current page data when UI updates
+    if (window.uiManager && window.uiManager.currentPage) {
+        console.log('🔄 Reloading page data for:', window.uiManager.currentPage);
+        window.uiManager.loadPageData(window.uiManager.currentPage);
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('🌐 School website initialized');
-
-    // Handle closing modals by clicking outside
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.onclick = (e) => {
-            if (e.target === modal && window.uiManager) {
+// Initialize the application when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('School website initialized');
+    
+    // Close modals when clicking outside
+    window.addEventListener('click', (e) => {
+        if (e.target.classList.contains('modal')) {
+            if (window.uiManager) {
                 window.uiManager.closeAllModals();
             }
         }
     });
 
-    // ❌ הוסר הבלוק שהפעיל את showPage('home') מוקדם מדי.
-
-    let isInitialized = false;
-
-    // Wait for both managers to initialize before starting the application
-    const checkReady = setInterval(() => {
-        if (window.authManager && window.uiManager && !isInitialized) {
-            clearInterval(checkReady);
-            isInitialized = true;
-
-            // 1. הפעל את עדכון ה-UI הראשון
-            console.log('✅ Managers ready, performing initial UI update...');
-            updateUI(); 
-
-            // 2. טען את דף הבית
-            console.log('✅ Showing home page and loading data');
-            window.uiManager.showPage('home');
+    // Initialize UI Manager first - show home page
+    if (window.uiManager) {
+        console.log('✅ UI Manager found, showing home page');
+        window.uiManager.showPage('home');
+    } else {
+        console.log('❌ UI Manager not found');
+    }
+    
+    // Wait for auth manager to initialize, then update UI
+    const checkAuthReady = setInterval(() => {
+        if (window.authManager) {
+            clearInterval(checkAuthReady);
+            console.log('✅ Auth manager ready, updating UI');
             
-            console.log('✅ Application fully initialized');
+            // Force update UI after auth is ready
+            setTimeout(() => {
+                updateUI();
+                console.log('✅ Application fully initialized');
+            }, 500);
         }
     }, 100);
 
-    // ❌ הוסרה לולאת ה-setTimeout הגיבוי המיותרת.
+    // Also try to update UI after a longer delay as backup
+    setTimeout(() => {
+        if (window.authManager && window.uiManager) {
+            console.log('🕒 Backup UI update');
+            updateUI();
+        }
+    }, 2000);
 });
 
 // Make updateUI globally available
@@ -139,3 +159,4 @@ window.addEventListener('error', function(e) {
 window.addEventListener('unhandledrejection', function(e) {
     console.error('Unhandled promise rejection:', e.reason);
 });
+
