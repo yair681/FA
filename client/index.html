@@ -455,6 +455,28 @@
         </div>
     </div>
 
+    <div id="add-student-to-class-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>הוספת תלמיד לכיתה</h2>
+                <button class="close-modal">&times;</button>
+            </div>
+            
+            <form id="add-student-to-class-form">
+                <input type="hidden" id="add-student-class-id">
+                
+                <div class="form-group">
+                    <label for="student-select">בחר תלמיד להוספה</label>
+                    <select id="student-select" required>
+                        </select>
+                    <small>רשימה זו מציגה תלמידים שעדיין לא נמצאים בכיתה</small>
+                </div>
+                
+                <button type="submit" class="btn">הוסף תלמיד</button>
+            </form>
+        </div>
+    </div>
+
     <div id="edit-class-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
