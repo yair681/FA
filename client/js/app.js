@@ -1,6 +1,7 @@
 // Main application initialization
 function updateUI() {
-    const user = authManager.currentUser;
+    // ✅ שימוש במשתנים הגלובליים (window.)
+    const user = window.authManager.currentUser;
     const userDisplay = document.getElementById('user-display');
     const loginBtn = document.getElementById('login-btn');
     const logoutBtn = document.getElementById('logout-btn');
@@ -25,7 +26,7 @@ function updateUI() {
         }
 
         // Show/hide teacher/admin buttons
-        const isTeacher = authManager.isTeacher();
+        const isTeacher = window.authManager.isTeacher();
         
         // Show add buttons for teachers/admins
         const addButtons = [
@@ -35,81 +36,61 @@ function updateUI() {
             'add-assignment-btn',
             'add-event-btn',
             'add-media-btn',
-            'add-user-btn',
-            'admin-add-class-btn'
+            'admin-link',
+            'settings-link'
         ];
-        
-        addButtons.forEach(btnId => {
-            const btn = document.getElementById(btnId);
+
+        addButtons.forEach(id => {
+            const btn = document.getElementById(id);
             if (btn) {
-                btn.style.display = isTeacher ? 'block' : 'none';
+                // מציג למורה או מנהל, או שומר על הגדרה קיימת
+                if (isTeacher) {
+                    btn.style.display = 'inline-block';
+                } else if (!user.role) {
+                    btn.style.display = 'none';
+                }
             }
         });
 
-        // Show teacher assignments section
-        const teacherSection = document.getElementById('teacher-assignments-section');
-        if (teacherSection) {
-            teacherSection.style.display = isTeacher ? 'block' : 'none';
+        // הסתרת קישור ניהול אם המשתמש הוא מורה/תלמיד
+        if (user.role === 'teacher' || user.role === 'student') {
+            adminLink.style.display = 'none';
         }
 
-        // Show student assignments section for students
-        const studentSection = document.getElementById('student-assignments-section');
-        if (studentSection) {
-            studentSection.style.display = authManager.isStudent() ? 'block' : 'none';
-        }
-
-        // Hide guest message for logged-in users
-        const guestSection = document.getElementById('guest-assignments-section');
-        if (guestSection) {
-            guestSection.style.display = 'none';
-        }
     } else {
         userDisplay.textContent = 'אורח';
         loginBtn.style.display = 'inline-block';
         logoutBtn.style.display = 'none';
         settingsLink.style.display = 'none';
         adminLink.style.display = 'none';
-        assignmentsLink.style.display = 'none'; // Hide assignments link for guests
-
-        // Hide all teacher/admin buttons
-        const addButtons = document.querySelectorAll('[id*="add-"]');
-        addButtons.forEach(btn => {
-            if (btn.id.includes('add-') && btn.tagName === 'BUTTON') {
-                btn.style.display = 'none';
-            }
+        
+        // הסתרת כל כפתורי ההוספה לאורח
+        const allAddButtons = [
+            'add-announcement-btn', 'add-global-announcement-btn', 'add-class-btn',
+            'add-assignment-btn', 'add-event-btn', 'add-media-btn', 'admin-link', 'settings-link'
+        ];
+        allAddButtons.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.style.display = 'none';
         });
 
-        const teacherSection = document.getElementById('teacher-assignments-section');
-        if (teacherSection) {
-            teacherSection.style.display = 'none';
-        }
-
-        const studentSection = document.getElementById('student-assignments-section');
-        if (studentSection) {
-            studentSection.style.display = 'none';
-        }
-
-        // Show guest message for assignments page
-        const guestSection = document.getElementById('guest-assignments-section');
-        if (guestSection) {
-            guestSection.style.display = 'block';
-        }
+        // הצגת קישור המשימות רק אם יש משימות ציבוריות (כרגע מוסתר לאורח)
+        assignmentsLink.style.display = 'block';
     }
-
-    // 🔥 FIX: Always reload current page data when UI updates
-    if (window.uiManager && window.uiManager.currentPage) {
-        console.log('🔄 Reloading page data for:', window.uiManager.currentPage);
+    
+    // טעינת נתונים עבור הדף הנוכחי
+    if (window.uiManager) {
         window.uiManager.loadPageData(window.uiManager.currentPage);
     }
 }
 
-// Initialize the application when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('School website initialized');
-    
-    // Close modals when clicking outside
-    window.addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal')) {
+// Global initialization logic (runs when app.js module is loaded)
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🌐 School website initialized');
+
+    // Close modals on escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
             if (window.uiManager) {
                 window.uiManager.closeAllModals();
             }
@@ -147,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 2000);
 });
 
-// Make updateUI globally available
+// Make updateUI globally available (so auth.js can call it)
 window.updateUI = updateUI;
 
 // Add global error handler
@@ -158,4 +139,8 @@ window.addEventListener('error', function(e) {
 // Add unhandled promise rejection handler
 window.addEventListener('unhandledrejection', function(e) {
     console.error('Unhandled promise rejection:', e.reason);
+    if (window.uiManager && e.reason instanceof ReferenceError) {
+        // מציג הודעת שגיאה כללית למשתמש
+        // window.uiManager.showError('שגיאה קריטית: אנא רענן את הדף');
+    }
 });
