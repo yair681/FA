@@ -1805,7 +1805,7 @@ class UIManager {
                     teachers: teacherIds,
                     students: studentIds
                 })
-            });
+            );
 
             if (response.ok) {
                 this.showSuccess('התלמיד הוסר בהצלחה');
