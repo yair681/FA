@@ -96,9 +96,12 @@ class UIManager {
                 if (e.target.value === 'image') {
                     fileTypes.textContent = 'תמונות נתמכות: JPG, PNG, GIF (מקסימום 10MB)';
                     mediaFile.accept = '.jpg,.jpeg,.png,.gif';
-                } else {
-                    fileTypes.textContent = 'סרטונים נתמכים: MP4, MOV, AVI (מקסימום 50MB)';
+                } else if (e.target.value === 'video') {
+                    fileTypes.textContent = 'סרטונים נתמכים: MP4, MOV, AVI (מקסימום 100MB)';
                     mediaFile.accept = '.mp4,.mov,.avi';
+                } else {
+                    fileTypes.textContent = 'כל סוגי הקבצים נתמכים (מקסימום 100MB)';
+                    mediaFile.removeAttribute('accept'); // ✅ אפשור כל קובץ
                 }
             });
             
@@ -116,19 +119,9 @@ class UIManager {
     }
 
     handleFileSelect(file) {
-        // Check file size (10MB max)
-        if (file.size > 10 * 1024 * 1024) {
-            this.showError('גודל הקובץ חייב להיות קטן מ-10MB');
-            return;
-        }
-
-        // Check file type
-        const allowedTypes = ['application/pdf', 'application/msword', 
-                             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                             'image/jpeg', 'image/jpg', 'image/png'];
-        
-        if (!allowedTypes.includes(file.type)) {
-            this.showError('סוג קובץ לא נתמך. אנא העלה קובץ PDF, Word או תמונה');
+        // ✅ שינוי: הגדלת מגבלת הגודל ל-100MB וביטול בדיקת סוגי קבצים
+        if (file.size > 100 * 1024 * 1024) {
+            this.showError('גודל הקובץ חייב להיות קטן מ-100MB');
             return;
         }
 
@@ -147,11 +140,9 @@ class UIManager {
     }
 
     handleMediaFileSelect(file) {
-        const mediaType = document.getElementById('media-type').value;
-        const maxSize = mediaType === 'image' ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
-        
-        if (file.size > maxSize) {
-            this.showError(`גודל הקובץ חייב להיות קטן מ-${mediaType === 'image' ? '10MB' : '50MB'}`);
+        // ✅ שינוי: מגבלה כללית של 100MB לכולם
+        if (file.size > 100 * 1024 * 1024) {
+            this.showError('גודל הקובץ חייב להיות קטן מ-100MB');
             return;
         }
 
@@ -160,6 +151,7 @@ class UIManager {
         // Show media preview
         const mediaPreview = document.getElementById('media-preview');
         mediaPreview.style.display = 'block';
+        const mediaType = document.getElementById('media-type').value;
         
         if (mediaType === 'image') {
             const reader = new FileReader();
@@ -167,7 +159,7 @@ class UIManager {
                 mediaPreview.innerHTML = `<img src="${e.target.result}" alt="Preview">`;
             };
             reader.readAsDataURL(file);
-        } else {
+        } else if (mediaType === 'video') {
             const reader = new FileReader();
             reader.onload = (e) => {
                 mediaPreview.innerHTML = `
@@ -178,6 +170,14 @@ class UIManager {
                 `;
             };
             reader.readAsDataURL(file);
+        } else {
+            // ✅ שינוי: תצוגה לקבצים כלליים
+            mediaPreview.innerHTML = `
+                <div style="padding: 20px; text-align: center;">
+                    <i class="fas fa-file-alt" style="font-size: 3rem; color: var(--primary);"></i>
+                    <p>${file.name}</p>
+                </div>
+            `;
         }
         
         this.showSuccess('קובץ נבחר בהצלחה');
@@ -346,7 +346,6 @@ class UIManager {
     }
 
     // Render functions
-    // ✅ FIXED: renderAnnouncements with badges and delete functionality
     renderAnnouncements(announcements, containerId, showActions = false) {
         const container = document.getElementById(containerId);
         
@@ -511,7 +510,6 @@ class UIManager {
         `}).join('');
     }
 
-    // ✅ FIXED: renderEvents with delete button
     renderEvents(events, containerId) {
         const container = document.getElementById(containerId);
         
@@ -546,6 +544,7 @@ class UIManager {
         `}).join('');
     }
 
+    // ✅ FIXED: renderMedia with support for generic files
     renderMedia(media, containerId) {
         const container = document.getElementById(containerId);
         
@@ -556,15 +555,31 @@ class UIManager {
 
         container.innerHTML = `
             <div class="media-grid">
-                ${media.map(item => `
+                ${media.map(item => {
+                    let contentHtml = '';
+                    if (item.type === 'image') {
+                        contentHtml = `<img src="${item.url}" alt="${item.title}" loading="lazy">`;
+                    } else if (item.type === 'video') {
+                        contentHtml = `<video controls>
+                                        <source src="${item.url}" type="video/mp4">
+                                        הדפדפן שלך אינו תומך בנגן וידאו.
+                                     </video>`;
+                    } else {
+                        // תצוגת קובץ כללי
+                        const fileName = item.url.split('/').pop().split('-').slice(1).join('-');
+                        contentHtml = `
+                            <div style="height: 200px; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #f8f9fa;">
+                                <i class="fas fa-file-alt" style="font-size: 4rem; color: var(--primary); margin-bottom: 10px;"></i>
+                                <a href="${item.url}" class="btn btn-sm" target="_blank" download>
+                                    <i class="fas fa-download"></i> הורדה
+                                </a>
+                            </div>
+                        `;
+                    }
+
+                    return `
                     <div class="media-item">
-                        ${item.type === 'image' ? 
-                            `<img src="${item.url}" alt="${item.title}" loading="lazy">` :
-                            `<video controls>
-                                <source src="${item.url}" type="video/mp4">
-                                הדפדפן שלך אינו תומך בנגן וידאו.
-                             </video>`
-                        }
+                        ${contentHtml}
                         <div class="media-info">
                             <h4>${item.title}</h4>
                             <p>${this.formatDate(item.date)}</p>
@@ -576,7 +591,7 @@ class UIManager {
                             ` : ''}
                         </div>
                     </div>
-                `).join('')}
+                `}).join('')}
             </div>
         `;
     }
@@ -678,7 +693,6 @@ class UIManager {
         const modal = document.getElementById('add-announcement-modal');
         modal.style.display = 'flex';
         
-        // Populate classes dropdown only with classes the teacher has access to
         if (authManager.isTeacher()) {
             const classes = await dbManager.getUserClasses();
             const teacherClasses = classes.filter(c => 
@@ -701,7 +715,6 @@ class UIManager {
         const modal = document.getElementById('add-assignment-modal');
         modal.style.display = 'flex';
         
-        // Populate classes dropdown only with classes the teacher has access to
         const classes = await dbManager.getUserClasses();
         const teacherClasses = classes.filter(c => 
             c.teachers?.some(t => t._id === authManager.currentUser.id) || authManager.isAdmin()
@@ -723,7 +736,6 @@ class UIManager {
         const modal = document.getElementById('submit-assignment-modal');
         modal.style.display = 'flex';
         
-        // Reset form
         document.getElementById('submission-text').value = '';
         this.removeSelectedFile();
         
@@ -750,7 +762,6 @@ class UIManager {
         const modal = document.getElementById('add-class-modal');
         modal.style.display = 'flex';
         
-        // Populate teachers dropdown
         const teachers = await dbManager.getTeachers();
         const teachersSelect = document.getElementById('class-teachers');
         teachersSelect.innerHTML = teachers
@@ -783,10 +794,8 @@ class UIManager {
         document.getElementById('add-media-form').onsubmit = (e) => this.handleAddMedia(e);
     }
 
-    // Edit Assignment Modal
     async editAssignment(assignmentId) {
         try {
-            // Get assignment details
             const assignments = await dbManager.getAssignments();
             const assignment = assignments.find(a => a._id === assignmentId);
             
@@ -795,13 +804,11 @@ class UIManager {
                 return;
             }
 
-            // Check if user has permission to edit
             if (!authManager.isAdmin() && assignment.teacher?._id !== authManager.currentUser.id) {
                 this.showError('אין לך הרשאה לערוך משימה זו');
                 return;
             }
 
-            // Create edit assignment modal
             const modal = document.createElement('div');
             modal.className = 'modal';
             modal.style.display = 'flex';
@@ -834,7 +841,6 @@ class UIManager {
             
             document.body.appendChild(modal);
             
-            // Set up form submission
             modal.querySelector('#edit-assignment-form').onsubmit = async (e) => {
                 e.preventDefault();
                 
@@ -843,7 +849,6 @@ class UIManager {
                 const dueDate = document.getElementById('edit-assignment-due-date').value;
                 
                 try {
-                    // Update assignment
                     const response = await fetch(`/api/assignments/${assignmentId}`, {
                         method: 'PUT',
                         headers: authManager.getAuthHeaders(),
@@ -867,7 +872,6 @@ class UIManager {
                 }
             };
             
-            // Close modal handlers
             modal.querySelector('.close-modal').onclick = () => {
                 document.body.removeChild(modal);
             };
@@ -883,7 +887,6 @@ class UIManager {
         }
     }
 
-    // Handler functions
     async handleLogin(e) {
         e.preventDefault();
         
@@ -1109,7 +1112,6 @@ class UIManager {
         }
         
         try {
-            // Verify current password
             const verifyResponse = await fetch('/api/login', {
                 method: 'POST',
                 headers: {
@@ -1126,7 +1128,6 @@ class UIManager {
                 return;
             }
             
-            // Update password
             const response = await fetch('/api/change-password', {
                 method: 'POST',
                 headers: authManager.getAuthHeaders(),
@@ -1154,7 +1155,6 @@ class UIManager {
         document.querySelector('.nav-link[data-page="home"]').classList.add('active');
     }
 
-    // Action methods
     async deleteAnnouncement(announcementId) {
         if (confirm('האם אתה בטוח שברצונך למחוק הודעה זו?')) {
             try {
@@ -1215,7 +1215,6 @@ class UIManager {
         }
     }
 
-    // ✅ FIXED: deleteEvent function
     async deleteEvent(eventId) {
         if (confirm('האם אתה בטוח שברצונך למחוק אירוע זה?')) {
             try {
@@ -1572,7 +1571,6 @@ class UIManager {
 
     async editUser(userId) {
         try {
-            // קבל את פרטי המשתמש
             const users = await dbManager.getUsers();
             const user = users.find(u => u._id === userId);
             
@@ -1581,23 +1579,19 @@ class UIManager {
                 return;
             }
 
-            // אל תאפשר עריכה של המנהל הראשי
             if (user.email === 'yairfrish2@gmail.com') {
                 this.showError('לא ניתן לערוך את מנהל המערכת הראשי');
                 return;
             }
 
-            // פתח מודל עריכה
             const modal = document.getElementById('edit-user-modal');
             modal.style.display = 'flex';
 
-            // מלא את הטופס עם נתוני המשתמש
             document.getElementById('edit-user-name').value = user.name;
             document.getElementById('edit-user-email').value = user.email;
             document.getElementById('edit-user-role').value = user.role;
             document.getElementById('edit-user-password').value = '';
 
-            // הגדר את ה-submit handler
             document.getElementById('edit-user-form').onsubmit = async (e) => {
                 e.preventDefault();
                 
@@ -1607,7 +1601,6 @@ class UIManager {
                 const password = document.getElementById('edit-user-password').value;
 
                 try {
-                    // עדכן את המשתמש
                     const response = await fetch(`/api/users/${userId}`, {
                         method: 'PUT',
                         headers: authManager.getAuthHeaders(),
@@ -1638,7 +1631,6 @@ class UIManager {
 
     async editClass(classId) {
         try {
-            // קבל את פרטי הכיתה
             const classes = await dbManager.getClasses();
             const classItem = classes.find(c => c._id === classId);
             
@@ -1647,32 +1639,26 @@ class UIManager {
                 return;
             }
 
-            // פתח מודל עריכה
             const modal = document.getElementById('edit-class-modal');
             modal.style.display = 'flex';
 
-            // מלא את הטופס עם נתוני הכיתה
             document.getElementById('edit-class-name').value = classItem.name;
 
-            // טען מורים ותלמידים
             const teachers = await dbManager.getTeachers();
             const students = await dbManager.getUsers();
             
-            // מלא את רשימת המורים
             const teachersSelect = document.getElementById('edit-class-teachers');
             teachersSelect.innerHTML = teachers
                 .filter(t => t._id !== authManager.currentUser.id)
                 .map(t => `<option value="${t._id}" ${classItem.teachers?.includes(t._id) ? 'selected' : ''}>${t.name} (${t.email})</option>`)
                 .join('');
 
-            // מלא את רשימת התלמידים
             const studentsSelect = document.getElementById('edit-class-students');
             studentsSelect.innerHTML = students
                 .filter(s => s.role === 'student')
                 .map(s => `<option value="${s._id}" ${classItem.students?.includes(s._id) ? 'selected' : ''}>${s.name} (${s.email})</option>`)
                 .join('');
 
-            // הגדר את ה-submit handler
             document.getElementById('edit-class-form').onsubmit = async (e) => {
                 e.preventDefault();
                 
@@ -1684,7 +1670,6 @@ class UIManager {
                 const selectedStudents = Array.from(studentsSelect.selectedOptions).map(option => option.value);
 
                 try {
-                    // עדכן את הכיתה
                     const response = await fetch(`/api/classes/${classId}`, {
                         method: 'PUT',
                         headers: authManager.getAuthHeaders(),
@@ -1712,7 +1697,6 @@ class UIManager {
         }
     }
 
-    // Utility functions
     formatDate(dateString) {
         if (!dateString) return '';
         const date = new Date(dateString);
@@ -1743,7 +1727,6 @@ class UIManager {
             element.textContent = message;
             element.style.display = message ? 'block' : 'none';
         } else {
-            // Use a nicer notification system instead of alert
             this.showNotification(message, 'error');
         }
     }
@@ -1753,7 +1736,6 @@ class UIManager {
     }
 
     showNotification(message, type = 'info') {
-        // Create notification element
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
         notification.innerHTML = `
@@ -1763,7 +1745,6 @@ class UIManager {
             </div>
         `;
         
-        // Add styles
         notification.style.cssText = `
             position: fixed;
             top: 20px;
@@ -1781,14 +1762,12 @@ class UIManager {
         
         document.body.appendChild(notification);
         
-        // Auto remove after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
             }
         }, 5000);
         
-        // Close on click
         notification.querySelector('.notification-close').onclick = () => {
             notification.parentNode.removeChild(notification);
         };
