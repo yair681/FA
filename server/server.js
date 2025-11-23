@@ -299,7 +299,7 @@ app.get('/api/classes', authenticateToken, async (req, res) => {
     res.json(classes);
 });
 
-// ⭐️ תיקון 2: הוספת הנתיב החסר /api/classes/my
+// ✅ תיקון קודם: הוספת הנתיב /api/classes/my
 app.get('/api/classes/my', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.userId;
@@ -450,6 +450,7 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
             const classIds = studentClasses.map(c => c._id);
             assignments = classIds.length === 0 ? [] : await Assignment.find({ class: { $in: classIds } }).populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
         } else {
+            // זהו הנתיב הגנרי, המיועד בעיקר לאדמין או לכלל המשימות
             assignments = await Assignment.find().populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
         }
         res.json(assignments);
@@ -457,6 +458,27 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+
+// ⭐️ תיקון 3: הוספת הנתיב החסר /api/assignments/teacher
+app.get('/api/assignments/teacher', authenticateToken, async (req, res) => {
+    try {
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Teacher or Admin access required' });
+        }
+
+        // מוצא את כל המשימות שהמשתמש הוא המורה שלהן
+        const assignments = await Assignment.find({ teacher: req.user.userId })
+            .populate('class', 'name')
+            .populate('teacher', 'name')
+            .sort({ dueDate: 1 });
+        
+        res.json(assignments);
+    } catch (error) {
+        console.error('Error fetching teacher assignments:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+// -------------------------------------------------------------
 
 app.post('/api/assignments', authenticateToken, async (req, res) => {
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
@@ -600,15 +622,13 @@ app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
-// ⭐️ תיקון 1: טיפול בבקשות API שלא נמצאו (404)
-// הבלוק הזה תופס כל נתיב שמתחיל ב-/api/ אבל לא תאם לאף נתב שהוגדר קודם,
-// ומחזיר תשובת JSON 404 תקינה.
+// ❌ טיפול שגיאת 404 ל-API (שומרים את זה)
 app.use('/api', (req, res) => {
   console.warn(`❌ 404 API Endpoint Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ error: `API endpoint not found: ${req.originalUrl}` });
 });
 
-// נתב ברירת המחדל - מחזיר את קובץ ה-HTML הראשי עבור כל נתיב אחר (SPA fallback)
+// נתב ברירת המחדל
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
