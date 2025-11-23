@@ -299,6 +299,35 @@ app.get('/api/classes', authenticateToken, async (req, res) => {
     res.json(classes);
 });
 
+// ⭐️ חדש: שליפת כיתה בודדת לפי ID (לצורך ניהול)
+app.get('/api/classes/:id', authenticateToken, async (req, res) => {
+    try {
+        const classItem = await Class.findById(req.params.id)
+          .populate('teacher', 'name email')
+          .populate('teachers', 'name email')
+          .populate('students', 'name email');
+        
+        if (!classItem) {
+            return res.status(404).json({ error: 'Class not found' });
+        }
+        
+        // בדיקת הרשאה: רק מנהל או מורה משויך יכולים לנהל כיתה
+        const userId = req.user.userId.toString();
+        const isAssociatedTeacher = (classItem.teacher && classItem.teacher._id.toString() === userId) ||
+                                     classItem.teachers.some(t => t._id.toString() === userId);
+
+        if (req.user.role !== 'admin' && !isAssociatedTeacher) {
+            return res.status(403).json({ error: 'Access denied: Only Admin or Associated Teacher can manage this class' });
+        }
+
+        res.json(classItem);
+    } catch (error) {
+        console.error('Error fetching single class:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 // ✅ תיקון קודם: הוספת הנתיב /api/classes/my
 app.get('/api/classes/my', authenticateToken, async (req, res) => {
     try {
@@ -349,7 +378,7 @@ app.put('/api/classes/:id', authenticateToken, async (req, res) => {
 
         // ✅ שינוי: מאפשר למורה של הכיתה לערוך אותה (להוסיף/להסיר תלמידים)
         const isClassTeacher = req.user.role === 'teacher' && (
-            classToUpdate.teacher.toString() === req.user.userId || 
+            (classToUpdate.teacher && classToUpdate.teacher.toString() === req.user.userId) || 
             classToUpdate.teachers.map(t => t.toString()).includes(req.user.userId)
         );
 
@@ -360,8 +389,13 @@ app.put('/api/classes/:id', authenticateToken, async (req, res) => {
         const { name, teachers, students } = req.body;
         
         if (name) classToUpdate.name = name;
+        // ⭐️ טיפול בהוספה/הסרת תלמידים מתבצע דרך שליחת מערך students מלא ב-PUT
+        if (students) {
+            // מוודא שה-students הם מערך של ID-ים תקינים
+            classToUpdate.students = students.filter(s => mongoose.Types.ObjectId.isValid(s));
+        }
         if (teachers) classToUpdate.teachers = teachers;
-        if (students) classToUpdate.students = students;
+
 
         await classToUpdate.save();
         
@@ -459,7 +493,7 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
     }
 });
 
-// ⭐️ תיקון 3: הוספת הנתיב החסר /api/assignments/teacher
+// ✅ תיקון קודם: הוספת הנתיב החסר /api/assignments/teacher
 app.get('/api/assignments/teacher', authenticateToken, async (req, res) => {
     try {
         if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
