@@ -346,6 +346,7 @@ class UIManager {
     }
 
     // Render functions
+    // ✅ FIXED: renderAnnouncements with badges and delete functionality
     renderAnnouncements(announcements, containerId, showActions = false) {
         const container = document.getElementById(containerId);
         
@@ -356,14 +357,23 @@ class UIManager {
 
         container.innerHTML = announcements.map(announcement => {
             const canDelete = authManager.isAdmin() || 
-                (authManager.isTeacher() && announcement.author?._id === authManager.currentUser.id);
+                (authManager.isTeacher() && announcement.author?._id === authManager.currentUser?.id);
             
+            let badgeHtml = '';
+            if (announcement.isGlobal) {
+                badgeHtml = '<span class="badge badge-primary">הודעה כללית</span>';
+            } else if (announcement.class) {
+                badgeHtml = `<span class="badge badge-warning">${announcement.class.name}</span>`;
+            } else {
+                badgeHtml = '<span class="badge badge-secondary">הודעה</span>';
+            }
+
             return `
             <div class="announcement">
                 ${showActions && canDelete ? `
                     <div class="announcement-actions">
                         <button class="btn btn-danger btn-sm" onclick="uiManager.deleteAnnouncement('${announcement._id}')">
-                            <i class="fas fa-trash"></i>
+                            <i class="fas fa-trash"></i> מחיקה
                         </button>
                     </div>
                 ` : ''}
@@ -373,11 +383,9 @@ class UIManager {
                 </div>
                 <div class="announcement-content">${announcement.content}</div>
                 <div class="announcement-meta">
-                    <span class="badge ${announcement.isGlobal ? 'badge-primary' : 'badge-secondary'}">
-                        ${announcement.isGlobal ? 'הודעה כללית' : 'הודעה לכיתה'}
-                    </span>
+                    ${badgeHtml}
                     <span style="margin-right: 10px; color: var(--gray); font-size: 0.9rem;">
-                        ${announcement.author?.name || 'מערכת'}
+                        מאת: ${announcement.author?.name || 'מערכת'}
                     </span>
                 </div>
             </div>
@@ -503,6 +511,7 @@ class UIManager {
         `}).join('');
     }
 
+    // ✅ FIXED: renderEvents with delete button
     renderEvents(events, containerId) {
         const container = document.getElementById(containerId);
         
@@ -512,7 +521,6 @@ class UIManager {
         }
 
         container.innerHTML = events.map(event => {
-            // בדיקה אם למשתמש יש הרשאה למחוק (מורה או מנהל)
             const canDelete = authManager.isAdmin() || 
                              (authManager.isTeacher() && event.author?._id === authManager.currentUser?.id) ||
                              authManager.isTeacher(); 
@@ -775,7 +783,7 @@ class UIManager {
         document.getElementById('add-media-form').onsubmit = (e) => this.handleAddMedia(e);
     }
 
-    // 🔥 NEW: Edit Assignment Modal
+    // Edit Assignment Modal
     async editAssignment(assignmentId) {
         try {
             // Get assignment details
@@ -1207,6 +1215,7 @@ class UIManager {
         }
     }
 
+    // ✅ FIXED: deleteEvent function
     async deleteEvent(eventId) {
         if (confirm('האם אתה בטוח שברצונך למחוק אירוע זה?')) {
             try {
