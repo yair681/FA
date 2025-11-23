@@ -101,7 +101,7 @@ class UIManager {
                     mediaFile.accept = '.mp4,.mov,.avi';
                 } else {
                     fileTypes.textContent = 'כל סוגי הקבצים נתמכים (מקסימום 100MB)';
-                    mediaFile.removeAttribute('accept'); // ✅ אפשור כל קובץ
+                    mediaFile.removeAttribute('accept');
                 }
             });
             
@@ -119,7 +119,7 @@ class UIManager {
     }
 
     handleFileSelect(file) {
-        // ✅ שינוי: הגדלת מגבלת הגודל ל-100MB וביטול בדיקת סוגי קבצים
+        // מגבלה כללית של 100MB
         if (file.size > 100 * 1024 * 1024) {
             this.showError('גודל הקובץ חייב להיות קטן מ-100MB');
             return;
@@ -140,7 +140,7 @@ class UIManager {
     }
 
     handleMediaFileSelect(file) {
-        // ✅ שינוי: מגבלה כללית של 100MB לכולם
+        // מגבלה כללית של 100MB
         if (file.size > 100 * 1024 * 1024) {
             this.showError('גודל הקובץ חייב להיות קטן מ-100MB');
             return;
@@ -171,7 +171,7 @@ class UIManager {
             };
             reader.readAsDataURL(file);
         } else {
-            // ✅ שינוי: תצוגה לקבצים כלליים
+            // תצוגה לקבצים כלליים
             mediaPreview.innerHTML = `
                 <div style="padding: 20px; text-align: center;">
                     <i class="fas fa-file-alt" style="font-size: 3rem; color: var(--primary);"></i>
@@ -544,7 +544,6 @@ class UIManager {
         `}).join('');
     }
 
-    // ✅ FIXED: renderMedia with support for generic files
     renderMedia(media, containerId) {
         const container = document.getElementById(containerId);
         
@@ -1325,6 +1324,7 @@ class UIManager {
         }
     }
 
+    // ✅ ניהול כיתה עם אפשרות הוספת/הסרת תלמידים
     async manageClass(classId) {
         try {
             const classes = await dbManager.getClasses();
@@ -1350,13 +1350,22 @@ class UIManager {
                             ${classItem.teachers?.map(t => `<li>${t.name} (${t.email})</li>`).join('') || '<li>אין מורים נוספים</li>'}
                         </ul>
                         
-                        <h3>תלמידים בכיתה:</h3>
-                        <ul>
-                            ${classItem.students?.map(s => `<li>${s.name} (${s.email})</li>`).join('') || '<li>אין תלמידים</li>'}
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                            <h3>תלמידים בכיתה (${classItem.students?.length || 0}):</h3>
+                            <button class="btn btn-sm" onclick="uiManager.openAddStudentToClassModal('${classId}')">
+                                <i class="fas fa-plus"></i> הוסף תלמיד
+                            </button>
+                        </div>
+                        <ul style="max-height: 200px; overflow-y: auto; background: #f9f9f9; padding: 10px; border-radius: 4px;">
+                            ${classItem.students?.map(s => `
+                                <li style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                    <span>${s.name} (${s.email})</span>
+                                    <button class="btn btn-danger btn-sm" onclick="uiManager.removeStudentFromClass('${classId}', '${s._id}')" title="הסר תלמיד">&times;</button>
+                                </li>`).join('') || '<li>אין תלמידים</li>'}
                         </ul>
                         
-                        <div class="class-management-actions">
-                            <button class="btn btn-warning" onclick="uiManager.editClass('${classId}')">עריכת כיתה</button>
+                        <div class="class-management-actions" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">
+                            <button class="btn btn-warning" onclick="uiManager.editClass('${classId}')">עריכת כיתה מלאה</button>
                             <button class="btn" onclick="uiManager.viewClassAssignments('${classId}')">משימות הכיתה</button>
                             <button class="btn btn-secondary" onclick="uiManager.viewClassAnnouncements('${classId}')">הודעות הכיתה</button>
                         </div>
@@ -1366,14 +1375,10 @@ class UIManager {
             
             document.body.appendChild(modal);
             
-            modal.querySelector('.close-modal').onclick = () => {
-                document.body.removeChild(modal);
-            };
-            
+            const closeBtn = modal.querySelector('.close-modal');
+            closeBtn.onclick = () => document.body.removeChild(modal);
             modal.onclick = (e) => {
-                if (e.target === modal) {
-                    document.body.removeChild(modal);
-                }
+                if (e.target === modal) document.body.removeChild(modal);
             };
             
         } catch (error) {
@@ -1694,6 +1699,126 @@ class UIManager {
             };
         } catch (error) {
             this.showError('שגיאה בטעינת פרטי הכיתה: ' + error.message);
+        }
+    }
+
+    // ✅ פתיחת מודל הוספת תלמיד
+    async openAddStudentToClassModal(classId) {
+        try {
+            const [users, classes] = await Promise.all([
+                dbManager.getUsers(),
+                dbManager.getClasses()
+            ]);
+            
+            const currentClass = classes.find(c => c._id === classId);
+            if (!currentClass) throw new Error('כיתה לא נמצאה');
+
+            const existingStudentIds = currentClass.students.map(s => s._id);
+            const availableStudents = users.filter(u => 
+                u.role === 'student' && !existingStudentIds.includes(u._id)
+            );
+
+            const modal = document.getElementById('add-student-to-class-modal');
+            const select = document.getElementById('student-select');
+            
+            if (availableStudents.length === 0) {
+                select.innerHTML = '<option disabled selected>אין תלמידים זמינים להוספה</option>';
+            } else {
+                select.innerHTML = '<option value="" disabled selected>בחר תלמיד...</option>' + 
+                    availableStudents.map(s => `<option value="${s._id}">${s.name} (${s.email})</option>`).join('');
+            }
+            
+            document.getElementById('add-student-class-id').value = classId;
+            modal.style.display = 'flex';
+            
+            document.getElementById('add-student-to-class-form').onsubmit = (e) => this.handleAddStudentToClass(e);
+
+        } catch (error) {
+            this.showError('שגיאה בטעינת רשימת התלמידים: ' + error.message);
+        }
+    }
+
+    // ✅ הוספת תלמיד לכיתה
+    async handleAddStudentToClass(e) {
+        e.preventDefault();
+        
+        const classId = document.getElementById('add-student-class-id').value;
+        const studentId = document.getElementById('student-select').value;
+        
+        if (!studentId) {
+            this.showError('נא לבחור תלמיד');
+            return;
+        }
+
+        try {
+            const classes = await dbManager.getClasses();
+            const currentClass = classes.find(c => c._id === classId);
+            
+            const teacherIds = currentClass.teachers.map(t => t._id);
+            const studentIds = currentClass.students.map(s => s._id);
+            studentIds.push(studentId);
+
+            const response = await fetch(`/api/classes/${classId}`, {
+                method: 'PUT',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    teachers: teacherIds,
+                    students: studentIds
+                })
+            });
+
+            if (response.ok) {
+                this.showSuccess('התלמיד נוסף בהצלחה');
+                document.getElementById('add-student-to-class-modal').style.display = 'none';
+                
+                document.querySelectorAll('.modal').forEach(m => {
+                    if (!m.id) m.remove();
+                });
+                this.manageClass(classId); 
+                this.loadPageData('classes'); 
+            } else {
+                const error = await response.json();
+                this.showError('שגיאה בהוספת התלמיד: ' + error.error);
+            }
+        } catch (error) {
+            this.showError('שגיאה: ' + error.message);
+        }
+    }
+
+    // ✅ הסרת תלמיד מהכיתה
+    async removeStudentFromClass(classId, studentId) {
+        if (!confirm('האם להסיר את התלמיד מהכיתה?')) return;
+
+        try {
+            const classes = await dbManager.getClasses();
+            const currentClass = classes.find(c => c._id === classId);
+            
+            const teacherIds = currentClass.teachers.map(t => t._id);
+            const studentIds = currentClass.students
+                .map(s => s._id)
+                .filter(id => id !== studentId);
+
+            const response = await fetch(`/api/classes/${classId}`, {
+                method: 'PUT',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    teachers: teacherIds,
+                    students: studentIds
+                })
+            });
+
+            if (response.ok) {
+                this.showSuccess('התלמיד הוסר בהצלחה');
+                document.querySelectorAll('.modal').forEach(m => {
+                    if (!m.id) m.remove();
+                });
+                this.manageClass(classId);
+                this.loadPageData('classes');
+            } else {
+                this.showError('שגיאה בהסרת התלמיד');
+            }
+        } catch (error) {
+            this.showError('שגיאה: ' + error.message);
         }
     }
 
