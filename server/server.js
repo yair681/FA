@@ -294,7 +294,19 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 
 // Classes
 app.get('/api/classes', authenticateToken, async (req, res) => {
-    const classes = await Class.find()
+    // ✅ מורים ותלמידים רואים רק את הכיתות שלהם
+    let query = {};
+    
+    if (req.user.role === 'student') {
+        // תלמידים רואים רק כיתות שהם חברים בהן
+        query = { students: req.user.userId };
+    } else if (req.user.role === 'teacher') {
+        // מורים רואים רק כיתות שהם מלמדים בהן
+        query = { teachers: req.user.userId };
+    }
+    // אדמינים רואים את כל הכיתות (query ריק)
+    
+    const classes = await Class.find(query)
       .populate('teacher', 'name email')
       .populate('teachers', 'name email')
       .populate('students', 'name email');
