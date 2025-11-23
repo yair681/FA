@@ -25,16 +25,6 @@ class UIManager {
 
         // Forms
         document.getElementById('login-form').addEventListener('submit', (e) => this.handleLogin(e));
-        document.getElementById('register-form')?.addEventListener('submit', (e) => this.handleRegister(e));
-        document.getElementById('add-announcement-form')?.addEventListener('submit', (e) => this.handleAddAnnouncement(e));
-        document.getElementById('add-assignment-form')?.addEventListener('submit', (e) => this.handleAddAssignment(e));
-        document.getElementById('submission-form')?.addEventListener('submit', (e) => this.handleSubmitAssignment(e));
-        document.getElementById('add-user-form')?.addEventListener('submit', (e) => this.handleAddUser(e));
-        document.getElementById('add-class-form')?.addEventListener('submit', (e) => this.handleAddClass(e));
-        document.getElementById('add-event-form')?.addEventListener('submit', (e) => this.handleAddEvent(e));
-        document.getElementById('add-media-form')?.addEventListener('submit', (e) => this.handleAddMedia(e));
-        document.getElementById('change-password-form')?.addEventListener('submit', (e) => this.handleChangePassword(e));
-        
 
         // Close modals
         document.querySelectorAll('.close-modal').forEach(btn => {
@@ -59,13 +49,6 @@ class UIManager {
 
         // File upload handlers
         this.initFileUploadHandlers();
-    }
-
-    // Utility function to log out
-    logout() {
-        authManager.logout();
-        this.showPage('home');
-        this.showSuccess('התנתקת בהצלחה');
     }
 
     initFileUploadHandlers() {
@@ -213,14 +196,7 @@ class UIManager {
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
-    
-    formatDate(dateString) {
-        const options = { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' };
-        return new Date(dateString).toLocaleDateString('he-IL', options);
-    }
 
-
-    // --- PAGE LOADING ---
     showPage(pageId) {
         document.querySelectorAll('.page').forEach(page => {
             page.style.display = page.id === `${pageId}-page` ? 'block' : 'none';
@@ -261,20 +237,12 @@ class UIManager {
             }
         } catch (error) {
             console.error('Error loading page:', error);
-            if (error.message.includes('Authentication required')) {
-                this.showError('התחברות נדרשת לצפייה בתוכן');
-                this.openLoginModal();
-            } else if (error.message.includes('Access denied')) {
-                this.showError('אין לך הרשאה לגשת לדף זה');
-                this.showPage('home');
-            } else {
-                this.showError('שגיאה בטעינת הנתונים');
-            }
+            this.showError('שגיאה בטעינת הנתונים');
         }
     }
-    
+
     async loadHomePage() {
-        await this.loadMediaPage(); // Load media gallery on home page
+        // Home page content is static
     }
 
     async loadAnnouncementsPage() {
@@ -283,645 +251,1620 @@ class UIManager {
     }
 
     async loadClassesPage() {
-        const classes = await dbManager.getClasses();
+        if (!authManager.currentUser) {
+            document.getElementById('classes-list').innerHTML = '<p>יש להתחבר כדי לצפות בכיתות</p>';
+            return;
+        }
+        
+        const classes = await dbManager.getUserClasses();
         this.renderClasses(classes, 'classes-list');
     }
 
     async loadAssignmentsPage() {
-        const assignments = await dbManager.getAssignments();
+        console.log('📚 Loading assignments page for user:', authManager.currentUser?.email);
         
-        document.getElementById('student-assignments-section').style.display = 'none';
-        document.getElementById('teacher-assignments-section').style.display = 'none';
-        document.getElementById('guest-assignments-section').style.display = 'block';
+        if (!authManager.currentUser) {
+            // Show guest message - no assignments data needed
+            console.log('👤 User not logged in, showing guest message');
+            document.getElementById('guest-assignments-section').style.display = 'block';
+            document.getElementById('student-assignments-section').style.display = 'none';
+            document.getElementById('teacher-assignments-section').style.display = 'none';
+            return;
+        }
+        
+        try {
+            console.log('🔄 Fetching assignments data...');
+            const assignments = await dbManager.getAssignments();
+            console.log('✅ Assignments data received:', assignments);
+            
+            // Show student assignments only to students
+            if (authManager.isStudent()) {
+                console.log('🎒 Showing student assignments section');
+                document.getElementById('student-assignments-section').style.display = 'block';
+                document.getElementById('teacher-assignments-section').style.display = 'none';
+                document.getElementById('guest-assignments-section').style.display = 'none';
+                this.renderAssignments(assignments, 'assignments-list');
+            }
 
-        if (authManager.isStudent()) {
-            document.getElementById('student-assignments-section').style.display = 'block';
-            document.getElementById('guest-assignments-section').style.display = 'none';
-            this.renderAssignments(assignments, 'assignments-list');
-        } else if (authManager.isTeacher()) {
-            document.getElementById('teacher-assignments-section').style.display = 'block';
-            document.getElementById('guest-assignments-section').style.display = 'none';
-            this.renderTeacherAssignments(assignments, 'teacher-assignments-list');
-        } 
+            // Show teacher assignments only to teachers/admins
+            if (authManager.isTeacher()) {
+                console.log('👨‍🏫 Showing teacher assignments section');
+                document.getElementById('teacher-assignments-section').style.display = 'block';
+                document.getElementById('student-assignments-section').style.display = 'none';
+                document.getElementById('guest-assignments-section').style.display = 'none';
+                this.renderTeacherAssignments(assignments, 'teacher-assignments-list');
+            }
+        } catch (error) {
+            console.error('❌ Error loading assignments page:', error);
+            this.showError('שגיאה בטעינת המשימות');
+            
+            // Show appropriate section even on error
+            if (authManager.isStudent()) {
+                document.getElementById('student-assignments-section').style.display = 'block';
+                document.getElementById('assignments-list').innerHTML = '<p>שגיאה בטעינת המשימות. נסה שוב מאוחר יותר.</p>';
+            } else if (authManager.isTeacher()) {
+                document.getElementById('teacher-assignments-section').style.display = 'block';
+                document.getElementById('teacher-assignments-list').innerHTML = '<p>שגיאה בטעינת המשימות. נסה שוב מאוחר יותר.</p>';
+            }
+        }
     }
 
     async loadEventsPage() {
         const events = await dbManager.getEvents();
         this.renderEvents(events, 'events-list');
-        // Hide add event button if not teacher/admin
-        const addEventBtn = document.getElementById('add-event-btn');
-        if (addEventBtn) {
-            addEventBtn.style.display = authManager.isTeacher() ? 'inline-block' : 'none';
-        }
     }
-    
+
     async loadHistoryPage() {
-        // For now, history is just the media gallery
-        await this.loadMediaPage();
-    }
-    
-    async loadMediaPage() {
         const media = await dbManager.getMedia();
         this.renderMedia(media, 'media-gallery');
-        
-        const addMediaBtn = document.getElementById('add-media-btn');
-        if (addMediaBtn) {
-            addMediaBtn.style.display = authManager.isTeacher() ? 'inline-block' : 'none';
-        }
     }
 
     async loadSettingsPage() {
-        // Static content for now, maybe future features
-        document.getElementById('current-user-email').textContent = authManager.currentUser.email;
-    }
-
-    async loadAdminPage() {
-        if (!authManager.isAdmin()) {
-            this.showError('גישת אדמין נדרשת');
-            this.showPage('home');
-            return;
-        }
-
-        const users = await dbManager.getUsers();
-        this.renderAdminUsers(users, 'admin-users-list');
-
-        const classes = await dbManager.getClasses();
-        this.renderClasses(classes, 'admin-classes-list'); // Re-use class rendering logic
-    }
-
-
-    // --- RENDERING ---
-    renderAnnouncements(announcements, containerId, showGlobalClass = false) {
-        const container = document.getElementById(containerId);
-        if (!announcements || announcements.length === 0) {
-            container.innerHTML = '<p class="info-message">אין הודעות להצגה.</p>';
+        if (!authManager.currentUser) {
+            document.getElementById('user-classes-list').innerHTML = '<p>יש להתחבר כדי לצפות בהגדרות</p>';
             return;
         }
         
-        container.innerHTML = announcements.map(a => {
-            const isAuthor = authManager.currentUser?._id === a.author?._id;
-            const canDelete = authManager.isAdmin() || isAuthor;
-            const announcementClass = a.class?.name ? `<span>(${a.class.name})</span>` : '';
-            const typeClass = a.type === 'global' ? 'global-announcement' : 'class-announcement';
+        const classes = await dbManager.getUserClasses();
+        this.renderUserClasses(classes, 'user-classes-list');
+
+        document.getElementById('change-password-form').onsubmit = (e) => this.handleChangePassword(e);
+    }
+
+    async loadAdminPage() {
+        if (!authManager.currentUser || !authManager.isAdmin()) {
+            document.getElementById('users-list').innerHTML = '<p>גישת מנהל נדרשת</p>';
+            document.getElementById('admin-classes-list').innerHTML = '<p>גישת מנהל נדרשת</p>';
+            return;
+        }
+        
+        const users = await dbManager.getUsers();
+        this.renderUsers(users, 'users-list');
+
+        const classes = await dbManager.getClasses();
+        this.renderAdminClasses(classes, 'admin-classes-list');
+    }
+
+    // Render functions
+    renderAnnouncements(announcements, containerId, showActions = false) {
+        const container = document.getElementById(containerId);
+        
+        if (!announcements || announcements.length === 0) {
+            container.innerHTML = '<p>אין הודעות להצגה</p>';
+            return;
+        }
+
+        container.innerHTML = announcements.map(announcement => {
+            const canDelete = authManager.isAdmin() || 
+                (authManager.isTeacher() && announcement.author?._id === authManager.currentUser?.id);
             
+            let badgeHtml = '';
+            if (announcement.isGlobal) {
+                badgeHtml = '<span class="badge badge-primary">הודעה כללית</span>';
+            } else if (announcement.class) {
+                badgeHtml = `<span class="badge badge-warning">${announcement.class.name}</span>`;
+            } else {
+                badgeHtml = '<span class="badge badge-secondary">הודעה</span>';
+            }
+
             return `
-                <div class="announcement ${typeClass}">
-                    ${canDelete ? `
-                        <div class="announcement-actions">
-                            <button class="btn btn-danger btn-sm" onclick="uiManager.deleteAnnouncement('${a._id}')">
-                                <i class="fas fa-trash"></i> מחיקה
-                            </button>
-                        </div>
-                    ` : ''}
-                    <div class="announcement-header">
-                        <div class="announcement-title">${a.title} ${showGlobalClass ? announcementClass : ''}</div>
-                        <div class="announcement-date">${this.formatDate(a.createdAt)}</div>
+            <div class="announcement">
+                ${showActions && canDelete ? `
+                    <div class="announcement-actions">
+                        <button class="btn btn-danger btn-sm" onclick="uiManager.deleteAnnouncement('${announcement._id}')">
+                            <i class="fas fa-trash"></i> מחיקה
+                        </button>
                     </div>
-                    <div class="announcement-content">${a.content.replace(/\n/g, '<br>')}</div>
-                    <div class="announcement-meta">
-                        <span style="color: var(--gray); font-size: 0.9rem;">נשלח על ידי: ${a.author?.name || 'מערכת'}</span>
-                    </div>
+                ` : ''}
+                <div class="announcement-header">
+                    <div class="announcement-title">${announcement.title}</div>
+                    <div class="announcement-date">${this.formatDate(announcement.createdAt)}</div>
                 </div>
-            `;
-        }).join('');
+                <div class="announcement-content">${announcement.content}</div>
+                <div class="announcement-meta">
+                    ${badgeHtml}
+                    <span style="margin-right: 10px; color: var(--gray); font-size: 0.9rem;">
+                        מאת: ${announcement.author?.name || 'מערכת'}
+                    </span>
+                </div>
+            </div>
+        `}).join('');
     }
 
     renderClasses(classes, containerId) {
         const container = document.getElementById(containerId);
+        
         if (!classes || classes.length === 0) {
-            container.innerHTML = '<p class="info-message">לא נמצאו כיתות להצגה.</p>';
+            container.innerHTML = '<p>אין כיתות להצגה</p>';
             return;
         }
 
         container.innerHTML = classes.map(classItem => {
-            const isTeacherOfClass = classItem.teachers.some(t => t._id === authManager.currentUser?._id) || classItem.teacher._id === authManager.currentUser?._id;
-            const isAdmin = authManager.isAdmin();
-
+            const isTeacherOfClass = authManager.isAdmin() || 
+                classItem.teachers?.some(t => t._id === authManager.currentUser.id);
+            
             return `
-                <div class="announcement">
-                    <div class="announcement-header">
-                        <div class="announcement-title">${classItem.name}</div>
-                    </div>
-                    <div class="announcement-content">
-                        <p><strong>מורה ראשי:</strong> ${classItem.teacher.name}</p>
-                        <p><strong>מספר תלמידים:</strong> ${classItem.students?.length || 0} / ${classItem.maxStudents}</p>
-                    </div>
-                    
-                    ${(isTeacherOfClass || isAdmin) ? `
+            <div class="announcement">
+                <div class="announcement-header">
+                    <div class="announcement-title">${classItem.name}</div>
+                </div>
+                <div class="announcement-content">
+                    <p><strong>מספר תלמידים:</strong> ${classItem.students?.length || 0}</p>
+                    <p><strong>מספר מורים:</strong> ${classItem.teachers?.length || 0}</p>
+                    ${isTeacherOfClass ? `
                         <div class="class-management-actions">
-                            <button class="btn btn-primary" onclick="uiManager.manageClass('${classItem._id}')">ניהול כיתה</button>
-                            ${isAdmin ? `<button class="btn btn-danger" onclick="uiManager.deleteClass('${classItem._id}')" style="margin-right:0.5rem;">מחיקה</button>` : ''}
+                            <button class="btn btn-secondary" onclick="uiManager.manageClass('${classItem._id}')">ניהול כיתה</button>
+                            <button class="btn" onclick="uiManager.viewClassStudents('${classItem._id}')">צפייה בתלמידים</button>
+                            <button class="btn btn-warning" onclick="uiManager.editClass('${classItem._id}')">עריכת כיתה</button>
                         </div>
                     ` : ''}
                 </div>
-            `;
-        }).join('');
+            </div>
+        `}).join('');
     }
 
     renderAssignments(assignments, containerId) {
-        // Student view rendering logic
-        // ... (implementation is long, assuming it's correctly handling student view: submit button, status) ...
         const container = document.getElementById(containerId);
+        
+        console.log('🎨 Rendering assignments for student, count:', assignments?.length || 0);
+        
         if (!assignments || assignments.length === 0) {
-            container.innerHTML = '<p class="info-message">אין משימות פתוחות.</p>';
+            container.innerHTML = '<p>אין משימות להצגה כרגע</p>';
             return;
         }
 
-        container.innerHTML = assignments.map(a => {
-            const studentSubmission = a.submissions.find(s => s.student === authManager.currentUser?._id);
-            const status = studentSubmission ? (studentSubmission.grade || 'הוגש') : 'טרם הוגש';
-            const statusClass = studentSubmission ? (studentSubmission.grade ? 'graded' : 'submitted') : 'pending';
-            const submissionText = studentSubmission ? `(הוגש ב: ${this.formatDate(studentSubmission.submittedAt)})` : '';
+        container.innerHTML = assignments.map(assignment => {
+            // Check if assignment exists and has required properties
+            if (!assignment || !assignment._id) {
+                console.warn('⚠️ Invalid assignment found:', assignment);
+                return '';
+            }
+
+            const userSubmission = assignment.submissions?.find(s => s.student === authManager.currentUser.id);
+            const isSubmitted = !!userSubmission;
+            const isOverdue = new Date(assignment.dueDate) < new Date();
             
             return `
-                <div class="announcement assignment-item ${statusClass}">
-                    <div class="announcement-header">
-                        <div class="announcement-title">${a.title} (${a.class.name})</div>
-                        <div class="announcement-date">תאריך הגשה: ${this.formatDate(a.dueDate)}</div>
-                    </div>
-                    <div class="announcement-content">
-                        <p>${a.description.replace(/\n/g, '<br>')}</p>
-                        <p><strong>סטטוס:</strong> ${status} ${submissionText}</p>
-                        ${studentSubmission && studentSubmission.fileUrl ? `<p><a href="${studentSubmission.fileUrl}" target="_blank"><i class="fas fa-file-download"></i> קובץ מצורף</a></p>` : ''}
-                    </div>
-                    <div class="class-management-actions">
-                        <button class="btn btn-secondary" onclick="uiManager.openSubmissionModal('${a._id}')">
-                            ${studentSubmission ? 'עדכון הגשה' : 'הגשת משימה'}
-                        </button>
+            <div class="announcement">
+                <div class="announcement-header">
+                    <div class="announcement-title">${assignment.title || 'ללא כותרת'}</div>
+                    <div class="announcement-date">
+                        תאריך הגשה: ${this.formatDate(assignment.dueDate)}
+                        ${isOverdue ? '<span class="badge badge-danger" style="margin-right:10px;">איחור</span>' : ''}
                     </div>
                 </div>
-            `;
-        }).join('');
+                <div class="announcement-content">${assignment.description || 'ללא תיאור'}</div>
+                <div class="announcement-meta">
+                    <span class="badge badge-warning">${assignment.teacher?.name || 'מורה'}</span>
+                    <span class="badge ${isSubmitted ? 'badge-secondary' : 'badge-primary'}">
+                        ${isSubmitted ? 'הוגש' : 'טרם הוגש'}
+                    </span>
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button class="btn" onclick="uiManager.openSubmitAssignmentModal('${assignment._id}')">
+                        ${isSubmitted ? 'עדכון הגשה' : 'הגשת משימה'}
+                    </button>
+                    ${isSubmitted ? `
+                        <span class="badge badge-secondary" style="margin-right: 10px;">
+                            הוגש ב: ${this.formatDate(userSubmission.submittedAt)}
+                            ${userSubmission.grade ? ` | ציון: ${userSubmission.grade}` : ''}
+                        </span>
+                    ` : ''}
+                </div>
+            </div>
+        `}).join('');
     }
 
     renderTeacherAssignments(assignments, containerId) {
-        // Teacher/Admin view rendering logic
-        // ... (implementation is long, assuming it's correctly handling teacher view: submissions list, grade button, edit/delete) ...
         const container = document.getElementById(containerId);
+        
         if (!assignments || assignments.length === 0) {
-            container.innerHTML = '<p class="info-message">אין משימות שהוגדרו או שהכיתות שלך טרם שויכו למשימות.</p>';
+            container.innerHTML = '<p>אין משימות להצגה</p>';
             return;
         }
 
-        container.innerHTML = assignments.map(a => {
-            const submissionsCount = a.submissions.length;
-            const classItem = a.class;
+        container.innerHTML = assignments.map(assignment => {
+            const submissionCount = assignment.submissions?.length || 0;
+            const gradedCount = assignment.submissions?.filter(s => s.grade).length || 0;
+            const canDelete = authManager.isAdmin() || assignment.teacher?._id === authManager.currentUser.id;
             
             return `
-                <div class="announcement assignment-item">
-                    <div class="announcement-actions">
-                        <button class="btn btn-warning btn-sm" onclick="uiManager.openEditAssignmentModal('${a._id}')">
-                            <i class="fas fa-edit"></i> עריכה
-                        </button>
-                        <button class="btn btn-danger btn-sm" onclick="uiManager.deleteAssignment('${a._id}')">
-                            <i class="fas fa-trash"></i> מחיקה
-                        </button>
-                    </div>
-                    <div class="announcement-header">
-                        <div class="announcement-title">${a.title} (${classItem.name})</div>
-                        <div class="announcement-date">תאריך הגשה: ${this.formatDate(a.dueDate)}</div>
-                    </div>
-                    <div class="announcement-content">
-                        <p>${a.description.replace(/\n/g, '<br>')}</p>
-                        <p><strong>הגשות:</strong> ${submissionsCount}</p>
-                    </div>
-                    <div class="class-management-actions">
-                        <button class="btn btn-secondary" onclick="uiManager.viewSubmissions('${a._id}')">
-                            צפייה בהגשות (${submissionsCount})
-                        </button>
-                    </div>
+            <div class="announcement">
+                <div class="announcement-header">
+                    <div class="announcement-title">${assignment.title}</div>
+                    <div class="announcement-date">תאריך הגשה: ${this.formatDate(assignment.dueDate)}</div>
                 </div>
-            `;
-        }).join('');
-    }
-
-    renderAdminUsers(users, containerId) {
-        // Admin view rendering logic
-        // ... (implementation is long, assumes rendering of user table with edit/delete buttons) ...
-        const container = document.getElementById(containerId);
-        if (!users || users.length === 0) {
-            container.innerHTML = '<p class="info-message">לא נמצאו משתמשים במערכת.</p>';
-            return;
-        }
-
-        let tableHtml = `
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>שם</th>
-                        <th>אימייל</th>
-                        <th>תפקיד</th>
-                        <th>פעולות</th>
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-
-        tableHtml += users.map(user => `
-            <tr>
-                <td>${user.name}</td>
-                <td>${user.email}</td>
-                <td>${user.role}</td>
-                <td>
-                    <button class="btn btn-warning btn-sm" onclick="uiManager.openEditUserModal('${user._id}')">עריכה</button>
-                    <button class="btn btn-danger btn-sm" onclick="uiManager.deleteUser('${user._id}')">מחיקה</button>
-                </td>
-            </tr>
-        `).join('');
-
-        tableHtml += '</tbody></table>';
-        container.innerHTML = tableHtml;
+                <div class="announcement-content">${assignment.description}</div>
+                <div class="announcement-content">
+                    <strong>מספר הגשות:</strong> ${submissionCount} | 
+                    <strong>מספר ציונים:</strong> ${gradedCount}
+                </div>
+                <div style="margin-top: 1rem;">
+                    <button class="btn" onclick="uiManager.viewSubmissions('${assignment._id}')">צפייה בהגשות</button>
+                    ${canDelete ? `
+                        <button class="btn btn-warning" onclick="uiManager.editAssignment('${assignment._id}')" style="margin-right:0.5rem;">עריכה</button>
+                        <button class="btn btn-danger" onclick="uiManager.deleteAssignment('${assignment._id}')" style="margin-right:0.5rem;">מחיקה</button>
+                    ` : ''}
+                </div>
+            </div>
+        `}).join('');
     }
 
     renderEvents(events, containerId) {
-        // Event rendering logic
         const container = document.getElementById(containerId);
+        
         if (!events || events.length === 0) {
-            container.innerHTML = '<p class="info-message">אין אירועים קרובים להצגה.</p>';
+            container.innerHTML = '<p>אין אירועים להצגה</p>';
             return;
         }
-        
+
         container.innerHTML = events.map(event => {
-            const canDelete = authManager.isAdmin() || (authManager.isTeacher() && event.author?._id === authManager.currentUser?._id);
-            
+            const canDelete = authManager.isAdmin() || 
+                             (authManager.isTeacher() && event.author?._id === authManager.currentUser?.id) ||
+                             authManager.isTeacher(); 
+
             return `
-                <div class="announcement event-item">
-                    ${canDelete ? `
-                        <div class="announcement-actions">
-                            <button class="btn btn-danger btn-sm" onclick="uiManager.deleteEvent('${event._id}')">
-                                <i class="fas fa-trash"></i> מחיקה
-                            </button>
-                        </div>
-                    ` : ''}
-                    <div class="announcement-header">
-                        <div class="announcement-title">${event.title}</div>
-                        <div class="announcement-date">${this.formatDate(event.date)}</div>
+            <div class="announcement">
+                ${canDelete ? `
+                    <div class="announcement-actions">
+                        <button class="btn btn-danger btn-sm" onclick="uiManager.deleteEvent('${event._id}')">
+                            <i class="fas fa-trash"></i> מחיקה
+                        </button>
                     </div>
-                    <div class="announcement-content">${event.description.replace(/\n/g, '<br>')}</div>
-                    <div class="announcement-meta">
-                        <span style="color: var(--gray); font-size: 0.9rem;">נוצר על ידי: ${event.author?.name || 'מערכת'}</span>
-                    </div>
+                ` : ''}
+                <div class="announcement-header">
+                    <div class="announcement-title">${event.title}</div>
+                    <div class="announcement-date">${this.formatDate(event.date)}</div>
                 </div>
-            `;
-        }).join('');
+                <div class="announcement-content">${event.description}</div>
+                <div class="announcement-meta">
+                    <span style="color: var(--gray); font-size: 0.9rem;">${event.author?.name || 'מערכת'}</span>
+                </div>
+            </div>
+        `}).join('');
     }
 
     renderMedia(media, containerId) {
-        // Media gallery rendering logic
         const container = document.getElementById(containerId);
+        
         if (!media || media.length === 0) {
-            container.innerHTML = '<p class="info-message">לא נמצאו פריטי מדיה להצגה.</p>';
+            container.innerHTML = '<p>אין מדיה להצגה</p>';
             return;
         }
 
-        container.innerHTML = media.map(m => {
-            let mediaContent;
-            if (m.type === 'image') {
-                mediaContent = `<img src="${m.url}" alt="${m.title}" loading="lazy">`;
-            } else if (m.type === 'video') {
-                mediaContent = `<video controls><source src="${m.url}" type="video/mp4">הדפדפן שלך אינו תומך.</video>`;
-            } else {
-                mediaContent = `
-                    <div class="file-representation">
-                        <i class="fas fa-file-alt"></i>
-                        <p>קובץ מצורף</p>
-                    </div>
-                `;
-            }
+        container.innerHTML = `
+            <div class="media-grid">
+                ${media.map(item => {
+                    let contentHtml = '';
+                    if (item.type === 'image') {
+                        contentHtml = `<img src="${item.url}" alt="${item.title}" loading="lazy">`;
+                    } else if (item.type === 'video') {
+                        contentHtml = `<video controls>
+                                        <source src="${item.url}" type="video/mp4">
+                                        הדפדפן שלך אינו תומך בנגן וידאו.
+                                     </video>`;
+                    } else {
+                        // תצוגת קובץ כללי
+                        const fileName = item.url.split('/').pop().split('-').slice(1).join('-');
+                        contentHtml = `
+                            <div style="height: 200px; display: flex; flex-direction: column; justify-content: center; align-items: center; background: #f8f9fa;">
+                                <i class="fas fa-file-alt" style="font-size: 4rem; color: var(--primary); margin-bottom: 10px;"></i>
+                                <a href="${item.url}" class="btn btn-sm" target="_blank" download>
+                                    <i class="fas fa-download"></i> הורדה
+                                </a>
+                            </div>
+                        `;
+                    }
 
-            const canDelete = authManager.isAdmin();
-
-            return `
-                <div class="media-item">
-                    ${mediaContent}
-                    <div class="media-info">
-                        <h4 class="media-title">${m.title}</h4>
-                        <p class="media-date">${this.formatDate(m.date)}</p>
-                        <a href="${m.url}" target="_blank" class="btn btn-sm btn-secondary" style="margin-top: 5px;">
-                            <i class="fas fa-download"></i> הורדה/צפייה
-                        </a>
-                        ${canDelete ? `<button class="btn btn-danger btn-sm" onclick="uiManager.deleteMedia('${m._id}')">מחיקה</button>` : ''}
+                    return `
+                    <div class="media-item">
+                        ${contentHtml}
+                        <div class="media-info">
+                            <h4>${item.title}</h4>
+                            <p>${this.formatDate(item.date)}</p>
+                            <p style="color: var(--gray); font-size: 0.9rem;">${item.author?.name || 'מערכת'}</p>
+                            ${authManager.isAdmin() ? `
+                                <button class="btn btn-danger btn-sm" onclick="uiManager.deleteMedia('${item._id}')" style="margin-top: 0.5rem;">
+                                    מחיקה
+                                </button>
+                            ` : ''}
+                        </div>
                     </div>
-                </div>
-            `;
-        }).join('');
+                `}).join('')}
+            </div>
+        `;
     }
 
+    renderUserClasses(classes, containerId) {
+        const container = document.getElementById(containerId);
+        
+        if (!classes || classes.length === 0) {
+            container.innerHTML = '<p>אין כיתות להצגה</p>';
+            return;
+        }
 
-    // --- MODAL FUNCTIONS ---
+        container.innerHTML = classes.map(classItem => `
+            <div class="announcement">
+                <div class="announcement-header">
+                    <div class="announcement-title">${classItem.name}</div>
+                </div>
+            </div>
+        `).join('');
+    }
 
+    renderUsers(users, containerId) {
+        const container = document.getElementById(containerId);
+        
+        if (!users || users.length === 0) {
+            container.innerHTML = '<p>אין משתמשים להצגה</p>';
+            return;
+        }
+
+        container.innerHTML = users.map(user => `
+            <div class="announcement">
+                <div class="announcement-header">
+                    <div class="announcement-title">${user.name}</div>
+                    <div class="announcement-date">
+                        <span class="badge ${this.getRoleBadgeClass(user.role)}">${this.getRoleDisplayName(user.role)}</span>
+                    </div>
+                </div>
+                <div class="announcement-content">
+                    <p><strong>אימייל:</strong> ${user.email}</p>
+                    <p><strong>מספר כיתות:</strong> ${user.classes?.length || 0}</p>
+                    <div style="margin-top: 1rem;">
+                        <button class="btn btn-warning" onclick="uiManager.editUser('${user._id}')">עריכה</button>
+                        ${user.role !== 'admin' && user.email !== 'yairfrish2@gmail.com' ? `
+                            <button class="btn btn-danger" onclick="uiManager.deleteUser('${user._id}')" style="margin-right:0.5rem;">מחיקה</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    renderAdminClasses(classes, containerId) {
+        const container = document.getElementById(containerId);
+        
+        if (!classes || classes.length === 0) {
+            container.innerHTML = '<p>אין כיתות להצגה</p>';
+            return;
+        }
+
+        container.innerHTML = classes.map(classItem => `
+            <div class="announcement">
+                <div class="announcement-header">
+                    <div class="announcement-title">${classItem.name}</div>
+                </div>
+                <div class="announcement-content">
+                    <p><strong>מספר תלמידים:</strong> ${classItem.students?.length || 0}</p>
+                    <p><strong>מספר מורים:</strong> ${classItem.teachers?.length || 0}</p>
+                    <div style="margin-top: 1rem;">
+                        <button class="btn btn-warning" onclick="uiManager.editClass('${classItem._id}')">עריכה</button>
+                        <button class="btn btn-danger" onclick="uiManager.deleteClass('${classItem._id}')" style="margin-right:0.5rem;">מחיקה</button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Modal functions
     openLoginModal() {
         document.getElementById('login-modal').style.display = 'flex';
     }
 
     closeAllModals() {
         document.querySelectorAll('.modal').forEach(modal => {
-            // Check if it's the dynamically created class management modal
-            if (modal.id === 'manage-class-modal') {
-                modal.remove(); 
-            } else {
-                modal.style.display = 'none';
-            }
+            modal.style.display = 'none';
         });
-        // Clear file state
         this.currentFile = null;
-        const filePreview = document.getElementById('file-preview');
-        if (filePreview) filePreview.style.display = 'none';
-        const mediaPreview = document.getElementById('media-preview');
-        if (mediaPreview) mediaPreview.style.display = 'none';
-        const submissionFile = document.getElementById('submission-file');
-        if (submissionFile) submissionFile.value = '';
-        const mediaFile = document.getElementById('media-file');
-        if (mediaFile) mediaFile.value = '';
+        document.getElementById('file-preview').style.display = 'none';
+        document.getElementById('media-preview').style.display = 'none';
+        document.getElementById('submission-file').value = '';
+        document.getElementById('media-file').value = '';
     }
 
-    async openAddAnnouncementModal(type = 'global', classId = null) {
+    async openAddAnnouncementModal() {
         if (!authManager.isTeacher()) {
             this.showError('גישת מורה נדרשת');
             return;
         }
-        
+
         const modal = document.getElementById('add-announcement-modal');
-        const typeSelect = document.getElementById('announcement-type');
-        const classGroup = document.getElementById('class-selection-group');
-        const classSelect = document.getElementById('announcement-class-id');
-        
-        // Load classes for the dropdown
-        try {
-            const classes = await dbManager.getClasses();
-            classSelect.innerHTML = classes.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
-        } catch (error) {
-            console.error('Error loading classes:', error);
-            this.showError('שגיאה בטעינת הכיתות');
-        }
-
-        // Set initial state based on call (e.g., from Manage Class button)
-        typeSelect.value = type;
-        if (type === 'class' && classId) {
-            classSelect.value = classId;
-            classGroup.style.display = 'block';
-        } else if (type === 'global') {
-            classGroup.style.display = 'none';
-        } else {
-            classGroup.style.display = 'none';
-            classSelect.value = classes.length > 0 ? classes[0]._id : '';
-        }
-
         modal.style.display = 'flex';
+        
+        if (authManager.isTeacher()) {
+            const classes = await dbManager.getUserClasses();
+            const teacherClasses = classes.filter(c => 
+                c.teachers?.some(t => t._id === authManager.currentUser.id) || authManager.isAdmin()
+            );
+            
+            const classSelect = document.getElementById('announcement-class');
+            classSelect.innerHTML = teacherClasses.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+        }
+        
+        document.getElementById('add-announcement-form').onsubmit = (e) => this.handleAddAnnouncement(e);
     }
 
-    async openAddAssignmentModal(classId = null) {
+    async openAddAssignmentModal() {
         if (!authManager.isTeacher()) {
             this.showError('גישת מורה נדרשת');
             return;
         }
-        
+
         const modal = document.getElementById('add-assignment-modal');
-        const classSelect = document.getElementById('assignment-class-id');
+        modal.style.display = 'flex';
+        
+        const classes = await dbManager.getUserClasses();
+        const teacherClasses = classes.filter(c => 
+            c.teachers?.some(t => t._id === authManager.currentUser.id) || authManager.isAdmin()
+        );
+        
+        const classSelect = document.getElementById('assignment-class');
+        classSelect.innerHTML = teacherClasses.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+        
+        document.getElementById('add-assignment-form').onsubmit = (e) => this.handleAddAssignment(e);
+    }
+
+    openSubmitAssignmentModal(assignmentId) {
+        if (!authManager.isStudent()) {
+            this.showError('גישת תלמיד נדרשת');
+            return;
+        }
+
+        this.currentAssignmentId = assignmentId;
+        const modal = document.getElementById('submit-assignment-modal');
+        modal.style.display = 'flex';
+        
+        document.getElementById('submission-text').value = '';
+        this.removeSelectedFile();
+        
+        document.getElementById('submit-assignment-form').onsubmit = (e) => this.handleSubmitAssignment(e);
+    }
+
+    openAddUserModal() {
+        if (!authManager.isAdmin()) {
+            this.showError('גישת מנהל נדרשת');
+            return;
+        }
+
+        const modal = document.getElementById('add-user-modal');
+        modal.style.display = 'flex';
+        
+        // ✅ הודעה למשתמש שהמשתמש יווצר ללא כיתות
+        this.showNotification('המשתמש יווצר ללא שיוך לכיתות. ניתן לשייך אותו לכיתות דרך ניהול הכיתה', 'info');
+        
+        document.getElementById('add-user-form').onsubmit = (e) => this.handleAddUser(e);
+    }
+
+    async openAddClassModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
+        const modal = document.getElementById('add-class-modal');
+        modal.style.display = 'flex';
+        
+        const teachers = await dbManager.getTeachers();
+        const teachersSelect = document.getElementById('class-teachers');
+        teachersSelect.innerHTML = teachers
+            .filter(t => t._id !== authManager.currentUser.id)
+            .map(t => `<option value="${t._id}">${t.name} (${t.email})</option>`)
+            .join('');
+        
+        // ✅ הודעה למשתמש שהכיתה נוצרת ללא תלמידים
+        this.showNotification('הכיתה תיווצר ללא תלמידים. תוכל להוסיף תלמידים לאחר מכן דרך ניהול הכיתה', 'info');
+        
+        document.getElementById('add-class-form').onsubmit = (e) => this.handleAddClass(e);
+    }
+
+    openAddEventModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
+        const modal = document.getElementById('add-event-modal');
+        modal.style.display = 'flex';
+        document.getElementById('add-event-form').onsubmit = (e) => this.handleAddEvent(e);
+    }
+
+    openAddMediaModal() {
+        if (!authManager.isTeacher()) {
+            this.showError('גישת מורה נדרשת');
+            return;
+        }
+
+        const modal = document.getElementById('add-media-modal');
+        modal.style.display = 'flex';
+        document.getElementById('add-media-form').onsubmit = (e) => this.handleAddMedia(e);
+    }
+
+    async editAssignment(assignmentId) {
+        try {
+            const assignments = await dbManager.getAssignments();
+            const assignment = assignments.find(a => a._id === assignmentId);
+            
+            if (!assignment) {
+                this.showError('משימה לא נמצאה');
+                return;
+            }
+
+            if (!authManager.isAdmin() && assignment.teacher?._id !== authManager.currentUser.id) {
+                this.showError('אין לך הרשאה לערוך משימה זו');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>עריכת משימה</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <form id="edit-assignment-form">
+                        <div class="form-group">
+                            <label for="edit-assignment-title">כותרת</label>
+                            <input type="text" id="edit-assignment-title" value="${assignment.title}" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="edit-assignment-description">תיאור</label>
+                            <textarea id="edit-assignment-description" required>${assignment.description}</textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="edit-assignment-due-date">תאריך הגשה</label>
+                            <input type="date" id="edit-assignment-due-date" value="${assignment.dueDate.split('T')[0]}" required>
+                        </div>
+                        
+                        <button type="submit" class="btn">עדכון משימה</button>
+                    </form>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            modal.querySelector('#edit-assignment-form').onsubmit = async (e) => {
+                e.preventDefault();
+                
+                const title = document.getElementById('edit-assignment-title').value;
+                const description = document.getElementById('edit-assignment-description').value;
+                const dueDate = document.getElementById('edit-assignment-due-date').value;
+                
+                try {
+                    const response = await fetch(`/api/assignments/${assignmentId}`, {
+                        method: 'PUT',
+                        headers: authManager.getAuthHeaders(),
+                        body: JSON.stringify({
+                            title,
+                            description,
+                            dueDate
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showSuccess('המשימה עודכנה בהצלחה');
+                        document.body.removeChild(modal);
+                        this.loadPageData('assignments');
+                    } else {
+                        const error = await response.json();
+                        this.showError('שגיאה בעדכון המשימה: ' + error.error);
+                    }
+                } catch (error) {
+                    this.showError('שגיאה בעדכון המשימה: ' + error.message);
+                }
+            };
+            
+            modal.querySelector('.close-modal').onclick = () => {
+                document.body.removeChild(modal);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            };
+            
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי המשימה: ' + error.message);
+        }
+    }
+
+    async handleLogin(e) {
+        e.preventDefault();
+        
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        
+        const result = await authManager.login(email, password);
+        
+        if (result.success) {
+            this.closeAllModals();
+            this.showError('', 'login-error');
+            this.showPage('home');
+        } else {
+            this.showError(result.error, 'login-error');
+        }
+    }
+
+    async handleAddAnnouncement(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('announcement-title').value;
+        const content = document.getElementById('announcement-content').value;
+        const type = document.getElementById('announcement-type').value;
+        const classId = type === 'class' ? document.getElementById('announcement-class').value : null;
         
         try {
-            const classes = await dbManager.getClasses();
-            classSelect.innerHTML = classes.map(c => `<option value="${c._id}">${c.name}</option>`).join('');
+            await dbManager.createAnnouncement({
+                title,
+                content,
+                isGlobal: type === 'global',
+                classId: classId
+            });
             
-            // Pre-select class if called from the management modal
-            if (classId) {
-                classSelect.value = classId;
-            } else if (classes.length > 0) {
-                classSelect.value = classes[0]._id;
+            this.showSuccess('ההודעה פורסמה בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('announcements');
+        } catch (error) {
+            this.showError('שגיאה בפרסום ההודעה: ' + error.message);
+        }
+    }
+
+    async handleAddAssignment(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('assignment-title').value;
+        const description = document.getElementById('assignment-description').value;
+        const classId = document.getElementById('assignment-class').value;
+        const dueDate = document.getElementById('assignment-due-date').value;
+        
+        try {
+            await dbManager.createAssignment({
+                title,
+                description,
+                classId,
+                dueDate
+            });
+            
+            this.showSuccess('המשימה נוספה בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('assignments');
+        } catch (error) {
+            this.showError('שגיאה בהוספת המשימה: ' + error.message);
+        }
+    }
+
+    async handleSubmitAssignment(e) {
+        e.preventDefault();
+        
+        const submissionText = document.getElementById('submission-text').value;
+        
+        if (!submissionText && !this.currentFile) {
+            this.showError('יש להזין תשובה או להעלות קובץ');
+            return;
+        }
+        
+        try {
+            const formData = new FormData();
+            formData.append('assignmentId', this.currentAssignmentId);
+            formData.append('submission', submissionText);
+            
+            if (this.currentFile) {
+                formData.append('file', this.currentFile);
+            }
+            
+            const response = await fetch('/api/assignments/submit', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${authManager.token}`
+                },
+                body: formData
+            });
+            
+            if (response.ok) {
+                this.showSuccess('המשימה הוגשה בהצלחה');
+                this.closeAllModals();
+                this.loadPageData('assignments');
+            } else {
+                const error = await response.json();
+                this.showError('שגיאה בהגשת המשימה: ' + error.error);
             }
         } catch (error) {
-            console.error('Error loading classes:', error);
-            this.showError('שגיאה בטעינת הכיתות');
+            this.showError('שגיאה בהגשת המשימה: ' + error.message);
         }
-
-        modal.style.display = 'flex';
     }
 
-    // ... (rest of modal functions, handle forms) ...
-    // Note: Edit/Submission/User/Class/Event modals and their handlers (handleAddClass, handleLogin, etc.) are assumed to be fully implemented.
+    async handleAddUser(e) {
+        e.preventDefault();
+        
+        const name = document.getElementById('user-name').value;
+        const email = document.getElementById('user-email').value;
+        const password = document.getElementById('user-password').value;
+        const role = document.getElementById('user-role').value;
+        
+        try {
+            await dbManager.createUser({
+                name,
+                email,
+                password,
+                role
+            });
+            
+            this.showSuccess('המשתמש נוצר בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('admin');
+        } catch (error) {
+            this.showError('שגיאה ביצירת המשתמש: ' + error.message);
+        }
+    }
 
-    // --- CLASS MANAGEMENT LOGIC (NEW) ---
-    
-    // New: Open management modal and load data
-    async manageClass(classId) {
-        if (!authManager.isTeacher()) {
-            this.showError('גישת מורה נדרשת');
+    async handleAddClass(e) {
+        e.preventDefault();
+        
+        const name = document.getElementById('class-name').value;
+        const teachersSelect = document.getElementById('class-teachers');
+        const selectedTeachers = Array.from(teachersSelect.selectedOptions).map(option => option.value);
+        
+        try {
+            await dbManager.createClass({
+                name,
+                teachers: selectedTeachers
+            });
+            
+            this.showSuccess('הכיתה נוצרה בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('classes');
+        } catch (error) {
+            this.showError('שגיאה ביצירת הכיתה: ' + error.message);
+        }
+    }
+
+    async handleAddEvent(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('event-title').value;
+        const description = document.getElementById('event-description').value;
+        const date = document.getElementById('event-date').value;
+        
+        try {
+            await dbManager.createEvent({
+                title,
+                description,
+                date
+            });
+            
+            this.showSuccess('האירוע נוסף בהצלחה');
+            this.closeAllModals();
+            this.loadPageData('events');
+        } catch (error) {
+            this.showError('שגיאה בהוספת האירוע: ' + error.message);
+        }
+    }
+
+    async handleAddMedia(e) {
+        e.preventDefault();
+        
+        const title = document.getElementById('media-title').value;
+        const type = document.getElementById('media-type').value;
+        const date = document.getElementById('media-date').value;
+        
+        if (!this.currentFile) {
+            this.showError('יש לבחור קובץ להעלאה');
             return;
         }
         
         try {
-            // Fetch class details and all students (who are not teachers/admins)
-            const classItem = await dbManager.getSingleClass(classId);
-            const allStudents = await dbManager.getAllStudents(); 
+            const formData = new FormData();
+            formData.append('title', title);
+            formData.append('type', type);
+            formData.append('date', date);
+            formData.append('file', this.currentFile);
             
-            this.renderManageClassModal(classItem, allStudents);
+            const response = await fetch('/api/media', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${authManager.token}`
+                },
+                body: formData
+            });
+            
+            if (response.ok) {
+                this.showSuccess('המדיה נוספה בהצלחה');
+                this.closeAllModals();
+                this.loadPageData('history');
+            } else {
+                const error = await response.json();
+                this.showError('שגיאה בהוספת המדיה: ' + error.error);
+            }
         } catch (error) {
-            console.error('Error opening class management modal:', error);
-            this.showError('שגיאה בטעינת נתוני ניהול הכיתה: ' + error.message);
+            this.showError('שגיאה בהוספת המדיה: ' + error.message);
         }
     }
 
-    // New: Render the class management modal
-    renderManageClassModal(classItem, allStudents) {
-        this.closeAllModals(); // Close any other open modals
+    async handleChangePassword(e) {
+        e.preventDefault();
         
+        const currentPassword = document.getElementById('current-password').value;
+        const newPassword = document.getElementById('new-password').value;
+        const confirmPassword = document.getElementById('confirm-password').value;
+        
+        if (newPassword !== confirmPassword) {
+            this.showError('הסיסמאות אינן תואמות');
+            return;
+        }
+        
+        try {
+            const verifyResponse = await fetch('/api/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: authManager.currentUser.email,
+                    password: currentPassword
+                })
+            });
+            
+            if (!verifyResponse.ok) {
+                this.showError('סיסמה נוכחית לא נכונה');
+                return;
+            }
+            
+            const response = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    newPassword: newPassword
+                })
+            });
+            
+            if (response.ok) {
+                this.showSuccess('סיסמה שונתה בהצלחה');
+                document.getElementById('change-password-form').reset();
+            } else {
+                this.showError('שגיאה בשינוי הסיסמה');
+            }
+        } catch (error) {
+            this.showError('שגיאה בשינוי הסיסמה: ' + error.message);
+        }
+    }
+
+    async logout() {
+        await authManager.logout();
+        this.showPage('home');
+        
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        document.querySelector('.nav-link[data-page="home"]').classList.add('active');
+    }
+
+    async deleteAnnouncement(announcementId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק הודעה זו?')) {
+            try {
+                await dbManager.deleteAnnouncement(announcementId);
+                this.loadPageData(this.currentPage);
+                this.showSuccess('ההודעה נמחקה בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת ההודעה: ' + error.message);
+            }
+        }
+    }
+
+    async deleteUser(userId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק משתמש זה?')) {
+            try {
+                await dbManager.deleteUser(userId);
+                this.loadPageData('admin');
+                this.showSuccess('המשתמש נמחק בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת המשתמש: ' + error.message);
+            }
+        }
+    }
+
+    async deleteClass(classId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק כיתה זו?')) {
+            try {
+                await dbManager.deleteClass(classId);
+                this.loadPageData('admin');
+                this.showSuccess('הכיתה נמחקה בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת הכיתה: ' + error.message);
+            }
+        }
+    }
+
+    async deleteMedia(mediaId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק פריט זה?')) {
+            try {
+                await dbManager.deleteMedia(mediaId);
+                this.loadPageData('history');
+                this.showSuccess('הפריט נמחק בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת הפריט: ' + error.message);
+            }
+        }
+    }
+
+    async deleteAssignment(assignmentId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק משימה זו?')) {
+            try {
+                await dbManager.deleteAssignment(assignmentId);
+                this.loadPageData('assignments');
+                this.showSuccess('המשימה נמחקה בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת המשימה: ' + error.message);
+            }
+        }
+    }
+
+    async deleteEvent(eventId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק אירוע זה?')) {
+            try {
+                await dbManager.deleteEvent(eventId);
+                this.loadPageData('events');
+                this.showSuccess('האירוע נמחק בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת האירוע: ' + error.message);
+            }
+        }
+    }
+
+    async viewSubmissions(assignmentId) {
+        try {
+            const response = await fetch(`/api/assignments/${assignmentId}/submissions`, {
+                headers: authManager.getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const submissions = await response.json();
+                this.showSubmissionsModal(submissions, assignmentId);
+            } else {
+                this.showError('שגיאה בטעינת ההגשות');
+            }
+        } catch (error) {
+            this.showError('שגיאה בטעינת ההגשות: ' + error.message);
+        }
+    }
+
+    showSubmissionsModal(submissions, assignmentId) {
         const modal = document.createElement('div');
         modal.className = 'modal';
-        modal.id = 'manage-class-modal';
         modal.style.display = 'flex';
-        
-        // Filter students not already in the class for the selection dropdown
-        const studentsInClassIds = classItem.students.map(s => s._id);
-        const availableStudents = allStudents.filter(s => !studentsInClassIds.includes(s._id));
-
         modal.innerHTML = `
-            <div class="modal-content class-management-modal">
-                <span class="close-modal">&times;</span>
-                <h2>ניהול כיתה: ${classItem.name}</h2>
-                <p>מורה ראשי: ${classItem.teacher.name}</p>
-
-                <div class="tab-system">
-                    <div class="tabs">
-                        <button class="tab-button active" data-tab="students-tab">תלמידים (${classItem.students.length})</button>
-                        <button class="tab-button" data-tab="assignments-tab">משימות</button>
-                        <button class="tab-button" data-tab="announcements-tab">הודעות</button>
-                    </div>
-                    
-                    <div class="tab-content active" id="students-tab">
-                        <h3>הוספת תלמיד</h3>
-                        <div class="form-group add-student-group">
-                            <select id="student-select-add" class="select-full-width">
-                                <option value="" disabled selected>בחר תלמיד...</option>
-                                ${availableStudents.map(s => `<option value="${s._id}">${s.name} (${s.email})</option>`).join('')}
-                                ${availableStudents.length === 0 ? '<option disabled>כל התלמידים שויכו לכיתות</option>' : ''}
-                            </select>
-                            <button class="btn btn-primary" id="add-student-submit-btn">הוספה</button>
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2>הגשות תלמידים</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="submissions-list">
+                    ${submissions.length === 0 ? '<p>אין הגשות</p>' : ''}
+                    ${submissions.map(sub => `
+                        <div class="submission-item">
+                            <div class="submission-header">
+                                <div class="submission-student">${sub.student?.name || 'תלמיד'}</div>
+                                <div class="submission-date">הוגש: ${this.formatDate(sub.submittedAt)}</div>
+                            </div>
+                            ${sub.submission ? `
+                                <div class="submission-content">
+                                    <strong>תשובה:</strong>
+                                    <p>${sub.submission}</p>
+                                </div>
+                            ` : ''}
+                            ${sub.fileUrl ? `
+                                <div class="submission-content">
+                                    <strong>קובץ:</strong>
+                                    <a href="${sub.fileUrl}" class="submission-file" target="_blank" download>
+                                        <i class="fas fa-download"></i>
+                                        הורד קובץ
+                                    </a>
+                                </div>
+                            ` : ''}
+                            <div class="grade-input">
+                                <label>ציון:</label>
+                                <input type="text" value="${sub.grade || ''}" 
+                                       onchange="uiManager.gradeSubmission('${assignmentId}', '${sub.student?._id}', this.value)"
+                                       placeholder="הזן ציון">
+                                ${sub.grade ? `<span class="badge badge-secondary">ציון סופי</span>` : ''}
+                            </div>
                         </div>
-
-                        <h3>תלמידים בכיתה</h3>
-                        <div style="max-height: 400px; overflow-y: auto;">
-                            <table class="data-table">
-                                <thead>
-                                    <tr>
-                                        <th>שם</th>
-                                        <th>אימייל</th>
-                                        <th>פעולות</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="class-students-list">
-                                    ${classItem.students.map(s => `
-                                        <tr>
-                                            <td>${s.name}</td>
-                                            <td>${s.email}</td>
-                                            <td>
-                                                <button class="btn btn-danger btn-sm" onclick="uiManager.removeStudentFromClass('${classItem._id}', '${s._id}')">הסרה</button>
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                    ${classItem.students.length === 0 ? '<tr><td colspan="3">אין תלמידים בכיתה זו.</td></tr>' : ''}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    <div class="tab-content" id="assignments-tab">
-                        <h3>משימות הכיתה</h3>
-                        <div id="class-assignments-list" class="assignments-list"></div>
-                        <button class="btn btn-secondary" onclick="uiManager.openAddAssignmentModal('${classItem._id}')">הוספת משימה</button>
-                    </div>
-                    
-                    <div class="tab-content" id="announcements-tab">
-                        <h3>הודעות הכיתה</h3>
-                        <div id="class-announcements-list" class="announcements-list"></div>
-                        <button class="btn btn-secondary" onclick="uiManager.openAddAnnouncementModal('class', '${classItem._id}')">הוספת הודעה</button>
-                    </div>
-
+                    `).join('')}
                 </div>
             </div>
         `;
         
         document.body.appendChild(modal);
-
-        // Add event listeners for the modal
-        modal.querySelector('.close-modal').addEventListener('click', () => this.closeAllModals());
-        modal.addEventListener('click', (e) => {
-            if (e.target.id === 'manage-class-modal') {
-                this.closeAllModals();
+        
+        modal.querySelector('.close-modal').onclick = () => {
+            document.body.removeChild(modal);
+        };
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
             }
-        });
-        
-        // Tab system logic
-        modal.querySelectorAll('.tab-button').forEach(button => {
-            button.addEventListener('click', (e) => {
-                modal.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-                modal.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
-                
-                e.target.classList.add('active');
-                document.getElementById(`${e.target.dataset.tab}`).classList.add('active');
-
-                // Load content dynamically on tab click
-                this.loadClassTabContent(classItem._id, e.target.dataset.tab);
-            });
-        });
-        
-        // Load dynamic content for the non-student tabs
-        this.loadClassTabContent(classItem._id, 'assignments-tab');
-        this.loadClassTabContent(classItem._id, 'announcements-tab');
-
-        // Submit button handler for adding student
-        document.getElementById('add-student-submit-btn').addEventListener('click', () => this.addStudentToClass(classItem._id));
+        };
     }
 
-    // New: Load dynamic content for class tabs
-    async loadClassTabContent(classId, tabId) {
+    async gradeSubmission(assignmentId, studentId, grade) {
         try {
-            const container = document.getElementById(tabId);
+            const response = await fetch('/api/assignments/grade', {
+                method: 'POST',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    assignmentId: assignmentId,
+                    studentId: studentId,
+                    grade: grade
+                })
+            });
             
-            if (tabId === 'students-tab') return; // Already rendered
-
-            const contentDiv = container.querySelector('.assignments-list, .announcements-list');
-            if (contentDiv) contentDiv.innerHTML = `<div class="loading">טוען נתונים...</div>`;
-            
-            if (tabId === 'assignments-tab') {
-                const assignments = await dbManager.getClassAssignments(classId);
-                if (assignments.length === 0) {
-                    contentDiv.innerHTML = '<p class="info-message">אין משימות לכיתה זו.</p>';
-                } else {
-                    this.renderTeacherAssignments(assignments, 'class-assignments-list');
-                }
-            } else if (tabId === 'announcements-tab') {
-                const announcements = await dbManager.getClassAnnouncements(classId);
-                if (announcements.length === 0) {
-                    contentDiv.innerHTML = '<p class="info-message">אין הודעות לכיתה זו.</p>';
-                } else {
-                    this.renderAnnouncements(announcements.filter(a => a.type === 'class'), 'class-announcements-list', false);
-                }
+            if (response.ok) {
+                this.showSuccess('ציון עודכן בהצלחה');
+            } else {
+                this.showError('שגיאה בעדכון הציון');
             }
         } catch (error) {
-            console.error(`Error loading tab ${tabId}:`, error);
-            const contentDiv = document.getElementById(tabId).querySelector('.assignments-list, .announcements-list');
-            if (contentDiv) contentDiv.innerHTML = '<p class="error-message">שגיאה בטעינת הנתונים.</p>';
+            this.showError('שגיאה בעדכון הציון: ' + error.message);
         }
     }
-    
-    // New: Handle student addition to class
-    async addStudentToClass(classId) {
-        const studentSelect = document.getElementById('student-select-add');
-        const studentId = studentSelect.value;
+
+    // ✅ ניהול כיתה עם אפשרות הוספת/הסרת תלמידים
+    // מורים ומנהלים יכולים לשייך תלמידים לכיתה ולהסיר אותם
+    async manageClass(classId) {
+        try {
+            const classes = await dbManager.getClasses();
+            const classItem = classes.find(c => c._id === classId);
+            
+            if (!classItem) {
+                this.showError('כיתה לא נמצאה');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 800px;">
+                    <div class="modal-header">
+                        <h2>ניהול כיתה - ${classItem.name}</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="announcement-content">
+                        <h3>מורים בכיתה:</h3>
+                        <ul>
+                            ${classItem.teachers?.map(t => `<li>${t.name} (${t.email})</li>`).join('') || '<li>אין מורים נוספים</li>'}
+                        </ul>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem;">
+                            <h3>תלמידים בכיתה (${classItem.students?.length || 0}):</h3>
+                            <button class="btn btn-sm" onclick="uiManager.openAddStudentToClassModal('${classId}')">
+                                <i class="fas fa-plus"></i> הוסף תלמיד
+                            </button>
+                        </div>
+                        <ul style="max-height: 200px; overflow-y: auto; background: #f9f9f9; padding: 10px; border-radius: 4px;">
+                            ${classItem.students?.map(s => `
+                                <li style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                    <span>${s.name} (${s.email})</span>
+                                    <button class="btn btn-danger btn-sm" onclick="uiManager.removeStudentFromClass('${classId}', '${s._id}')" title="הסר תלמיד">&times;</button>
+                                </li>`).join('') || '<li>אין תלמידים</li>'}
+                        </ul>
+                        
+                        <div class="class-management-actions" style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">
+                            <button class="btn btn-warning" onclick="uiManager.editClass('${classId}')">עריכת כיתה מלאה</button>
+                            <button class="btn" onclick="uiManager.viewClassAssignments('${classId}')">משימות הכיתה</button>
+                            <button class="btn btn-secondary" onclick="uiManager.viewClassAnnouncements('${classId}')">הודעות הכיתה</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            const closeBtn = modal.querySelector('.close-modal');
+            closeBtn.onclick = () => document.body.removeChild(modal);
+            modal.onclick = (e) => {
+                if (e.target === modal) document.body.removeChild(modal);
+            };
+            
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי הכיתה: ' + error.message);
+        }
+    }
+
+    async viewClassStudents(classId) {
+        try {
+            const classes = await dbManager.getClasses();
+            const classItem = classes.find(c => c._id === classId);
+            
+            if (!classItem) {
+                this.showError('כיתה לא נמצאה');
+                return;
+            }
+
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'flex';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width: 600px;">
+                    <div class="modal-header">
+                        <h2>תלמידי הכיתה - ${classItem.name}</h2>
+                        <button class="close-modal">&times;</button>
+                    </div>
+                    <div class="announcement-content">
+                        ${classItem.students?.length > 0 ? `
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>שם</th>
+                                        <th>אימייל</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${classItem.students.map(student => `
+                                        <tr>
+                                            <td>${student.name}</td>
+                                            <td>${student.email}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        ` : '<p>אין תלמידים בכיתה זו</p>'}
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            modal.querySelector('.close-modal').onclick = () => {
+                document.body.removeChild(modal);
+            };
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) {
+                    document.body.removeChild(modal);
+                }
+            };
+            
+        } catch (error) {
+            this.showError('שגיאה בטעינת תלמידי הכיתה: ' + error.message);
+        }
+    }
+
+    async viewClassAssignments(classId) {
+        try {
+            const response = await fetch(`/api/classes/${classId}/assignments`, {
+                headers: authManager.getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const assignments = await response.json();
+                this.showClassAssignmentsModal(assignments, classId);
+            } else {
+                this.showError('שגיאה בטעינת משימות הכיתה');
+            }
+        } catch (error) {
+            this.showError('שגיאה בטעינת משימות הכיתה: ' + error.message);
+        }
+    }
+
+    showClassAssignmentsModal(assignments, classId) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2>משימות הכיתה</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="assignments-list">
+                    ${assignments.length === 0 ? '<p>אין משימות בכיתה זו</p>' : ''}
+                    ${assignments.map(assignment => {
+                        const submissionCount = assignment.submissions?.length || 0;
+                        const gradedCount = assignment.submissions?.filter(s => s.grade).length || 0;
+                        
+                        return `
+                        <div class="announcement">
+                            <div class="announcement-header">
+                                <div class="announcement-title">${assignment.title}</div>
+                                <div class="announcement-date">תאריך הגשה: ${this.formatDate(assignment.dueDate)}</div>
+                            </div>
+                            <div class="announcement-content">${assignment.description}</div>
+                            <div class="announcement-content">
+                                <strong>מספר הגשות:</strong> ${submissionCount} | 
+                                <strong>מספר ציונים:</strong> ${gradedCount}
+                            </div>
+                            <div style="margin-top: 1rem;">
+                                <button class="btn" onclick="uiManager.viewSubmissions('${assignment._id}')">צפייה בהגשות</button>
+                            </div>
+                        </div>
+                    `}).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.querySelector('.close-modal').onclick = () => {
+            document.body.removeChild(modal);
+        };
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        };
+    }
+
+    async viewClassAnnouncements(classId) {
+        try {
+            const response = await fetch(`/api/classes/${classId}/announcements`, {
+                headers: authManager.getAuthHeaders()
+            });
+            
+            if (response.ok) {
+                const announcements = await response.json();
+                this.showClassAnnouncementsModal(announcements, classId);
+            } else {
+                this.showError('שגיאה בטעינת הודעות הכיתה');
+            }
+        } catch (error) {
+            this.showError('שגיאה בטעינת הודעות הכיתה: ' + error.message);
+        }
+    }
+
+    showClassAnnouncementsModal(announcements, classId) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.style.display = 'flex';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2>הודעות הכיתה</h2>
+                    <button class="close-modal">&times;</button>
+                </div>
+                <div class="announcements-list">
+                    ${announcements.length === 0 ? '<p>אין הודעות בכיתה זו</p>' : ''}
+                    ${announcements.map(announcement => `
+                        <div class="announcement">
+                            <div class="announcement-header">
+                                <div class="announcement-title">${announcement.title}</div>
+                                <div class="announcement-date">${this.formatDate(announcement.createdAt)}</div>
+                            </div>
+                            <div class="announcement-content">${announcement.content}</div>
+                            <div class="announcement-meta">
+                                <span class="badge ${announcement.isGlobal ? 'badge-primary' : 'badge-secondary'}">
+                                    ${announcement.isGlobal ? 'הודעה כללית' : 'הודעה לכיתה'}
+                                </span>
+                                <span style="margin-right: 10px; color: var(--gray); font-size: 0.9rem;">
+                                    ${announcement.author?.name || 'מערכת'}
+                                </span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        modal.querySelector('.close-modal').onclick = () => {
+            document.body.removeChild(modal);
+        };
+        
+        modal.onclick = (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        };
+    }
+
+    async editUser(userId) {
+        try {
+            const users = await dbManager.getUsers();
+            const user = users.find(u => u._id === userId);
+            
+            if (!user) {
+                this.showError('משתמש לא נמצא');
+                return;
+            }
+
+            if (user.email === 'yairfrish2@gmail.com') {
+                this.showError('לא ניתן לערוך את מנהל המערכת הראשי');
+                return;
+            }
+
+            const modal = document.getElementById('edit-user-modal');
+            modal.style.display = 'flex';
+
+            document.getElementById('edit-user-name').value = user.name;
+            document.getElementById('edit-user-email').value = user.email;
+            document.getElementById('edit-user-role').value = user.role;
+            document.getElementById('edit-user-password').value = '';
+
+            document.getElementById('edit-user-form').onsubmit = async (e) => {
+                e.preventDefault();
+                
+                const name = document.getElementById('edit-user-name').value;
+                const email = document.getElementById('edit-user-email').value;
+                const role = document.getElementById('edit-user-role').value;
+                const password = document.getElementById('edit-user-password').value;
+
+                try {
+                    const response = await fetch(`/api/users/${userId}`, {
+                        method: 'PUT',
+                        headers: authManager.getAuthHeaders(),
+                        body: JSON.stringify({
+                            name,
+                            email,
+                            role,
+                            password: password || undefined
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showSuccess('המשתמש עודכן בהצלחה');
+                        this.closeAllModals();
+                        this.loadPageData('admin');
+                    } else {
+                        const error = await response.json();
+                        this.showError('שגיאה בעדכון המשתמש: ' + error.error);
+                    }
+                } catch (error) {
+                    this.showError('שגיאה בעדכון המשתמש: ' + error.message);
+                }
+            };
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי המשתמש: ' + error.message);
+        }
+    }
+
+    async editClass(classId) {
+        try {
+            const classes = await dbManager.getClasses();
+            const classItem = classes.find(c => c._id === classId);
+            
+            if (!classItem) {
+                this.showError('כיתה לא נמצאה');
+                return;
+            }
+
+            const modal = document.getElementById('edit-class-modal');
+            modal.style.display = 'flex';
+
+            document.getElementById('edit-class-name').value = classItem.name;
+
+            const teachers = await dbManager.getTeachers();
+            const students = await dbManager.getUsers();
+            
+            const teachersSelect = document.getElementById('edit-class-teachers');
+            teachersSelect.innerHTML = teachers
+                .filter(t => t._id !== authManager.currentUser.id)
+                .map(t => `<option value="${t._id}" ${classItem.teachers?.includes(t._id) ? 'selected' : ''}>${t.name} (${t.email})</option>`)
+                .join('');
+
+            const studentsSelect = document.getElementById('edit-class-students');
+            studentsSelect.innerHTML = students
+                .filter(s => s.role === 'student')
+                .map(s => `<option value="${s._id}" ${classItem.students?.includes(s._id) ? 'selected' : ''}>${s.name} (${s.email})</option>`)
+                .join('');
+
+            document.getElementById('edit-class-form').onsubmit = async (e) => {
+                e.preventDefault();
+                
+                const name = document.getElementById('edit-class-name').value;
+                const teachersSelect = document.getElementById('edit-class-teachers');
+                const studentsSelect = document.getElementById('edit-class-students');
+                
+                const selectedTeachers = Array.from(teachersSelect.selectedOptions).map(option => option.value);
+                const selectedStudents = Array.from(studentsSelect.selectedOptions).map(option => option.value);
+
+                try {
+                    const response = await fetch(`/api/classes/${classId}`, {
+                        method: 'PUT',
+                        headers: authManager.getAuthHeaders(),
+                        body: JSON.stringify({
+                            name,
+                            teachers: selectedTeachers,
+                            students: selectedStudents
+                        })
+                    });
+
+                    if (response.ok) {
+                        this.showSuccess('הכיתה עודכנה בהצלחה');
+                        this.closeAllModals();
+                        this.loadPageData('admin');
+                    } else {
+                        const error = await response.json();
+                        this.showError('שגיאה בעדכון הכיתה: ' + error.error);
+                    }
+                } catch (error) {
+                    this.showError('שגיאה בעדכון הכיתה: ' + error.message);
+                }
+            };
+        } catch (error) {
+            this.showError('שגיאה בטעינת פרטי הכיתה: ' + error.message);
+        }
+    }
+
+    // ✅ פתיחת מודל הוספת תלמיד לכיתה
+    // מציג רק תלמידים שעדיין לא שייכים לכיתה הנוכחית
+    async openAddStudentToClassModal(classId) {
+        try {
+            const [users, classes] = await Promise.all([
+                dbManager.getUsers(),
+                dbManager.getClasses()
+            ]);
+            
+            const currentClass = classes.find(c => c._id === classId);
+            if (!currentClass) throw new Error('כיתה לא נמצאה');
+
+            const existingStudentIds = currentClass.students.map(s => s._id);
+            const availableStudents = users.filter(u => 
+                u.role === 'student' && !existingStudentIds.includes(u._id)
+            );
+
+            const modal = document.getElementById('add-student-to-class-modal');
+            const select = document.getElementById('student-select');
+            
+            if (availableStudents.length === 0) {
+                select.innerHTML = '<option disabled selected>אין תלמידים זמינים להוספה</option>';
+            } else {
+                select.innerHTML = '<option value="" disabled selected>בחר תלמיד...</option>' + 
+                    availableStudents.map(s => `<option value="${s._id}">${s.name} (${s.email})</option>`).join('');
+            }
+            
+            document.getElementById('add-student-class-id').value = classId;
+            modal.style.display = 'flex';
+            
+            document.getElementById('add-student-to-class-form').onsubmit = (e) => this.handleAddStudentToClass(e);
+
+        } catch (error) {
+            this.showError('שגיאה בטעינת רשימת התלמידים: ' + error.message);
+        }
+    }
+
+    // ✅ הוספת תלמיד לכיתה באמצעות PUT request
+    // מעדכן את רשימת התלמידים בכיתה
+    async handleAddStudentToClass(e) {
+        e.preventDefault();
+        
+        const classId = document.getElementById('add-student-class-id').value;
+        const studentId = document.getElementById('student-select').value;
         
         if (!studentId) {
-            this.showError('אנא בחר תלמיד להוספה');
+            this.showError('נא לבחור תלמיד');
             return;
         }
 
         try {
-            // 1. Get the current class to find the current list of students (via single class endpoint)
-            const classItem = await dbManager.getSingleClass(classId);
+            const classes = await dbManager.getClasses();
+            const currentClass = classes.find(c => c._id === classId);
             
-            // 2. Add the new student ID and update the class
-            const currentStudentIds = classItem.students.map(s => s._id);
-            const newStudents = [...currentStudentIds, studentId];
+            const teacherIds = currentClass.teachers.map(t => t._id);
+            const studentIds = currentClass.students.map(s => s._id);
+            studentIds.push(studentId);
 
-            await dbManager.updateClass(classId, { students: newStudents });
-            
-            this.showSuccess('התלמיד נוסף בהצלחה לכיתה');
-            // Re-open the management modal to refresh the list
-            this.manageClass(classId); 
-        } catch (error) {
-            console.error('Error adding student:', error);
-            this.showError('שגיאה בהוספת התלמיד: ' + error.message);
-        }
-    }
-    
-    // New: Handle student removal from class
-    async removeStudentFromClass(classId, studentId) {
-        if (confirm('האם אתה בטוח שברצונך להסיר תלמיד זה מהכיתה?')) {
-            try {
-                // 1. Get the current class to find the list of students/teachers
-                const classItem = await dbManager.getSingleClass(classId);
+            const response = await fetch(`/api/classes/${classId}`, {
+                method: 'PUT',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    teachers: teacherIds,
+                    students: studentIds
+                })
+            });
+
+            if (response.ok) {
+                this.showSuccess('התלמיד נוסף בהצלחה');
+                document.getElementById('add-student-to-class-modal').style.display = 'none';
                 
-                // 2. Filter out the student to be removed
-                const newStudents = classItem.students.filter(s => s._id !== studentId).map(s => s._id);
-
-                // 3. Update the class (keep teachers list as is)
-                await dbManager.updateClass(classId, { 
-                    students: newStudents, 
-                    teachers: classItem.teachers.map(t => t._id) 
+                document.querySelectorAll('.modal').forEach(m => {
+                    if (!m.id) m.remove();
                 });
-                
-                this.showSuccess('התלמיד הוסר בהצלחה מהכיתה');
-                // Re-open the management modal to refresh the list
                 this.manageClass(classId); 
-            } catch (error) {
-                console.error('Error removing student:', error);
-                this.showError('שגיאה בהסרת התלמיד: ' + error.message);
+                this.loadPageData('classes'); 
+            } else {
+                const error = await response.json();
+                this.showError('שגיאה בהוספת התלמיד: ' + error.error);
             }
+        } catch (error) {
+            this.showError('שגיאה: ' + error.message);
         }
     }
 
-    // --- NOTIFICATION UTILITIES ---
-    showError(message) {
-        this.showNotification(message, 'error');
+    // ✅ הסרת תלמיד מהכיתה באמצעות PUT request
+    // מסיר את התלמיד מרשימת התלמידים בכיתה
+    async removeStudentFromClass(classId, studentId) {
+        if (!confirm('האם להסיר את התלמיד מהכיתה?')) return;
+
+        try {
+            const classes = await dbManager.getClasses();
+            const currentClass = classes.find(c => c._id === classId);
+            
+            const teacherIds = currentClass.teachers.map(t => t._id);
+            const studentIds = currentClass.students
+                .map(s => s._id)
+                .filter(id => id !== studentId);
+
+            const response = await fetch(`/api/classes/${classId}`, {
+                method: 'PUT',
+                headers: authManager.getAuthHeaders(),
+                body: JSON.stringify({
+                    teachers: teacherIds,
+                    students: studentIds
+                })
+            });
+
+            if (response.ok) {
+                this.showSuccess('התלמיד הוסר בהצלחה');
+                document.querySelectorAll('.modal').forEach(m => {
+                    if (!m.id) m.remove();
+                });
+                this.manageClass(classId);
+                this.loadPageData('classes');
+            } else {
+                this.showError('שגיאה בהסרת התלמיד');
+            }
+        } catch (error) {
+            this.showError('שגיאה: ' + error.message);
+        }
+    }
+
+    formatDate(dateString) {
+        if (!dateString) return '';
+        const date = new Date(dateString);
+        return date.toLocaleDateString('he-IL');
+    }
+
+    getRoleDisplayName(role) {
+        const roles = {
+            'student': 'תלמיד',
+            'teacher': 'מורה',
+            'admin': 'מנהל מערכת'
+        };
+        return roles[role] || role;
+    }
+
+    getRoleBadgeClass(role) {
+        const classes = {
+            'student': 'badge-secondary',
+            'teacher': 'badge-primary',
+            'admin': 'badge-warning'
+        };
+        return classes[role] || 'badge-secondary';
+    }
+
+    showError(message, elementId = null) {
+        if (elementId) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.style.display = message ? 'block' : 'none';
+        } else {
+            this.showNotification(message, 'error');
+        }
     }
 
     showSuccess(message) {
@@ -943,7 +1886,7 @@ class UIManager {
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: ${type === 'error' ? 'var(--danger)' : type === 'success' ? 'var(--secondary)' : 'var(--primary)'};
+            background: ${type === 'error' ? '#e74c3c' : type === 'success' ? '#2ecc71' : '#3498db'};
             color: white;
             padding: 12px 20px;
             border-radius: 4px;
@@ -955,22 +1898,16 @@ class UIManager {
         
         document.body.appendChild(notification);
         
-        // Close on button click
-        notification.querySelector('.notification-close').addEventListener('click', () => {
-             if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        });
-
-        // Auto close after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
             }
         }, 5000);
+        
+        notification.querySelector('.notification-close').onclick = () => {
+            notification.parentNode.removeChild(notification);
+        };
     }
 }
 
-// Create global instance
 const uiManager = new UIManager();
-window.uiManager = uiManager;
