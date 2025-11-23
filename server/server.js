@@ -1,5 +1,3 @@
-// server.js - קוד מלא לאחר שינויים
-
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
@@ -19,7 +17,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
+const JWT_SECRET = processs.env.JWT_SECRET || 'fallback-secret-key';
 
 // Middleware
 app.use(cors());
@@ -38,392 +36,531 @@ const storage = multer.diskStorage({
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
         // תמיכה בשמות קבצים בעברית
-        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.א-ת\-\_]/g, '_');
+        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.\u0590-\u05FF]/g, '_');
         cb(null, uniqueSuffix + '-' + cleanName);
     }
 });
+const upload = multer({ storage: storage });
 
-// הגדלת המגבלה ל-100MB
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 100 * 1024 * 1024 } 
-});
-
-// חשיפת קבצים סטטיים
-app.use(express.static(path.join(__dirname, '..', 'client')));
-app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
-app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
-app.use('/uploads', express.static(uploadDir));
-
-
-// חיבור ל-MongoDB
-const MONGODB_URI = process.env.MONGODB_URI;
-
-console.log('🔗 Connecting to MongoDB...');
-
-mongoose.connect(MONGODB_URI)
+// Database Connection
+mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log('✅ Connected to MongoDB'))
-    .catch(err => console.error('❌ MongoDB connection error:', err));
+    .catch(err => console.error('❌ Could not connect to MongoDB:', err));
 
-
-// סכמות MongoDB
+// Schemas
 const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, enum: ['student', 'teacher', 'admin'], required: true },
-  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Class' }], // רשימת הכיתות שהמשתמש שייך אליהן
-  createdAt: { type: Date, default: Date.now }
-});
-
-const classSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  teachers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // רשימת התלמידים בכיתה
-  createdAt: { type: Date, default: Date.now }
-});
-
-const announcementSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  content: { type: String, required: true },
-  type: { type: String, enum: ['global', 'class'], default: 'global' },
-  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: function() { return this.type === 'class'; } },
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  createdAt: { type: Date, default: Date.now }
-});
-
-const assignmentSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: true },
-  teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  dueDate: { type: Date, required: true },
-  submissions: [{
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    submission: String,
-    fileUrl: String,
-    submittedAt: { type: Date, default: Date.now },
-    grade: Number,
-    gradedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    gradeDate: Date
-  }],
-  createdAt: { type: Date, default: Date.now }
-});
-
-const eventSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  date: { type: Date, required: true },
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  createdAt: { type: Date, default: Date.now }
-});
-
-const mediaSchema = new mongoose.Schema({
-    title: { type: String, default: 'ללא כותרת' },
-    type: { type: String, enum: ['image', 'video', 'file'], default: 'file' },
-    url: { type: String, required: true },
-    date: { type: Date, default: Date.now },
-    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    role: { type: String, enum: ['admin', 'teacher', 'student'], default: 'student' },
+    classes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Class' }], // Class IDs the user is associated with
     createdAt: { type: Date, default: Date.now }
 });
-
 const User = mongoose.model('User', userSchema);
+
+const classSchema = new mongoose.Schema({
+    name: { type: String, required: true, unique: true },
+    teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // Student IDs in the class
+    gradeLevel: String,
+    description: String,
+    createdAt: { type: Date, default: Date.now }
+});
 const Class = mongoose.model('Class', classSchema);
+
+const announcementSchema = new mongoose.Schema({
+    title: String,
+    content: String,
+    targetClass: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: false }, // Null for global
+    isGlobal: { type: Boolean, default: false },
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    createdAt: { type: Date, default: Date.now }
+});
 const Announcement = mongoose.model('Announcement', announcementSchema);
+
+const assignmentSchema = new mongoose.Schema({
+    title: String,
+    description: String,
+    dueDate: Date,
+    targetClass: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: true },
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    createdAt: { type: Date, default: Date.now }
+});
 const Assignment = mongoose.model('Assignment', assignmentSchema);
+
+const eventSchema = new mongoose.Schema({
+    title: String,
+    description: String,
+    date: Date,
+    location: String,
+    targetClass: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: false }, // Null for all
+    isGlobal: { type: Boolean, default: false },
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    createdAt: { type: Date, default: Date.now }
+});
 const Event = mongoose.model('Event', eventSchema);
+
+const mediaSchema = new mongoose.Schema({
+    title: String,
+    type: { type: String, enum: ['image', 'video', 'file'], default: 'file' },
+    url: String, // Path to the file
+    date: Date,
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    createdAt: { type: Date, default: Date.now }
+});
 const Media = mongoose.model('Media', mediaSchema);
 
-
-// פונקציות עזר
+// JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (token == null) return res.sendStatus(401);
+    if (token == null) return res.sendStatus(401); // Unauthorized
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.sendStatus(403);
+        if (err) {
+            console.log('JWT Error:', err.message);
+            return res.sendStatus(403); // Forbidden
+        }
         req.user = user;
         next();
     });
 };
 
-const authorizeRole = (roles) => (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-        return res.status(403).json({ error: 'Access denied' });
-    }
-    next();
-};
-
-// ===== נתיבי משתמשים (User Routes) =====
-
-// רישום משתמש חדש
+// --- AUTH ROUTES ---
 app.post('/api/register', async (req, res) => {
     try {
         const { name, email, password, role } = req.body;
 
-        // ודא שהתפקיד חוקי
-        if (!['student', 'teacher', 'admin'].includes(role)) {
-            return res.status(400).json({ error: 'Invalid role' });
+        // Basic validation
+        if (!name || !email || !password || !role) {
+            return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        // הצפנת סיסמה
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ error: 'User already exists' });
+        }
 
-        // יצירת משתמש חדש - ללא שיוך אוטומטי
-        const user = new User({
-            name,
-            email,
-            password: hashedPassword,
-            role,
-            classes: [] 
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Ensure student and teacher accounts start with empty classes array
+        const newUser = new User({ 
+            name, 
+            email, 
+            password: hashedPassword, 
+            role, 
+            classes: [] // Crucial for new student/teacher accounts
         });
 
-        await user.save();
-
-        // יצירת טוקן
-        const token = jwt.sign(
-            { userId: user._id, email: user.email, role: user.role },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        res.status(201).json({ token, user: { name: user.name, email: user.email, role: user.role, userId: user._id, classes: user.classes } });
+        await newUser.save();
+        
+        // Generate token and send user info (without password)
+        const token = jwt.sign({ userId: newUser._id, role: newUser.role, name: newUser.name }, JWT_SECRET, { expiresIn: '24h' });
+        const userObj = newUser.toObject();
+        delete userObj.password;
+        
+        res.status(201).json({ token, user: userObj });
     } catch (error) {
-        if (error.code === 11000) {
-            return res.status(400).json({ error: 'Email already exists' });
-        }
         res.status(500).json({ error: 'Registration failed: ' + error.message });
     }
 });
 
-// התחברות
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await User.findOne({ email }).populate('classes');
-
-        if (!user) {
-            return res.status(400).json({ error: 'Invalid email or password' });
+        const user = await User.findOne({ email });
+        
+        if (!user || !(await bcrypt.compare(password, user.password))) {
+            return res.status(401).json({ error: 'Invalid credentials' });
         }
+        
+        const token = jwt.sign({ userId: user._id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '24h' });
+        const userObj = user.toObject();
+        delete userObj.password;
 
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) {
-            return res.status(400).json({ error: 'Invalid email or password' });
-        }
-
-        const token = jwt.sign(
-            { userId: user._id, email: user.email, role: user.role },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        res.json({ token, user: { name: user.name, email: user.email, role: user.role, userId: user._id, classes: user.classes.map(c => c._id) } });
+        res.json({ token, user: userObj });
     } catch (error) {
         res.status(500).json({ error: 'Login failed: ' + error.message });
     }
 });
 
-// אימות טוקן
 app.get('/api/validate-token', authenticateToken, async (req, res) => {
     try {
-        const user = await User.findById(req.user.userId).select('-password').populate('classes');
-        if (!user) return res.status(404).json({ error: 'User not found' });
-        res.json({ name: user.name, email: user.email, role: user.role, userId: user._id, classes: user.classes.map(c => c._id) });
+        const user = await User.findById(req.user.userId).select('-password');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
     } catch (error) {
         res.status(500).json({ error: 'Token validation failed' });
     }
 });
 
-// קבלת כל המשתמשים (למנהלי מערכת)
-app.get('/api/users', authenticateToken, authorizeRole(['admin']), async (req, res) => {
+// --- CLASS ROUTES ---
+app.post('/api/classes', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
     try {
-        const users = await User.find().select('-password');
-        res.json(users);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching users: ' + error.message });
-    }
-});
-
-// **נתיב חדש: קבלת כל התלמידים (לצורך ניהול כיתות)**
-app.get('/api/users/students', authenticateToken, authorizeRole(['teacher', 'admin']), async (req, res) => {
-    try {
-        const students = await User.find({ role: 'student' }).select('_id name email classes');
-        res.json(students);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching students: ' + error.message });
-    }
-});
-
-
-// ===== נתיבי כיתות (Class Routes) =====
-
-// יצירת כיתה חדשה
-app.post('/api/classes', authenticateToken, authorizeRole(['teacher', 'admin']), async (req, res) => {
-    try {
-        const { name } = req.body;
+        const { name, teacherId, gradeLevel, description } = req.body;
         
-        // יצירת כיתה חדשה - ללא שיוך אוטומטי של תלמידים
         const newClass = new Class({
             name,
-            teachers: [req.user.userId], // המורה היוצר משויך אוטומטית כמורה
-            students: [] 
+            teacher: teacherId || null, // Allow class creation without a teacher initially
+            gradeLevel,
+            description,
+            students: [] // Crucial: New class starts with an empty students array
         });
 
         await newClass.save();
 
-        // עדכון המורה: הוספת הכיתה לרשימת הכיתות שלו
-        await User.findByIdAndUpdate(req.user.userId, { $addToSet: { classes: newClass._id } });
-
+        // Update teacher's classes array if a teacher was assigned
+        if (teacherId) {
+            await User.findByIdAndUpdate(teacherId, { $addToSet: { classes: newClass._id } });
+        }
+        
         res.status(201).json(newClass);
     } catch (error) {
         res.status(500).json({ error: 'Error creating class: ' + error.message });
     }
 });
 
-// קבלת רשימת כיתות
-app.get('/api/classes', authenticateToken, async (req, res) => {
+app.get('/api/classes', async (req, res) => {
     try {
-        // טען את כל הכיתות וקשר מורים ותלמידים
         const classes = await Class.find()
-            .populate('teachers', 'name email _id')
-            .populate('students', 'name email _id');
-        
-        // סנן לפי תפקיד:
-        if (req.user.role === 'admin') {
-            // מנהל רואה את כל הכיתות
-            res.json(classes);
-        } else {
-            // מורה/תלמיד רואה רק את הכיתות שמשויך אליהן
-            const userClasses = classes.filter(c => 
-                c.teachers.some(t => t._id.toString() === req.user.userId) ||
-                c.students.some(s => s._id.toString() === req.user.userId)
-            );
-            res.json(userClasses);
-        }
+            .populate('teacher', 'name email')
+            .populate('students', 'name email role')
+            .sort({ name: 1 });
+        res.json(classes);
     } catch (error) {
-        res.status(500).json({ error: 'Error fetching classes: ' + error.message });
+        res.status(500).json({ error: 'Error fetching classes' });
     }
 });
 
-// קבלת כיתה ספציפית
-app.get('/api/classes/:id', authenticateToken, async (req, res) => {
+app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
     try {
-        const classItem = await Class.findById(req.params.id)
-            .populate('teachers', 'name email _id')
-            .populate('students', 'name email _id');
-
-        if (!classItem) {
-            return res.status(404).json({ error: 'Class not found' });
-        }
-        
-        // ודא שהמשתמש משויך לכיתה
-        const isUserInClass = classItem.teachers.some(t => t._id.toString() === req.user.userId) || 
-                              classItem.students.some(s => s._id.toString() === req.user.userId) ||
-                              req.user.role === 'admin';
-
-        if (!isUserInClass) {
-            return res.status(403).json({ error: 'Access denied: Not a member of this class' });
-        }
-
-        res.json(classItem);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching class: ' + error.message });
-    }
-});
-
-// מחיקת כיתה
-app.delete('/api/classes/:id', authenticateToken, authorizeRole(['admin']), async (req, res) => {
-    try {
-        const classId = req.params.id;
-        const deletedClass = await Class.findByIdAndDelete(classId);
-
-        if (!deletedClass) {
+        const classToDelete = await Class.findById(req.params.id);
+        if (!classToDelete) {
             return res.status(404).json({ error: 'Class not found' });
         }
 
-        // הסר את ה-ID של הכיתה מכל המשתמשים שהיו משויכים אליה
+        // Remove class from associated teachers/students
         await User.updateMany(
-            { $or: [{ classes: classId }, { classes: classId }] }, 
+            { classes: req.params.id },
+            { $pull: { classes: req.params.id } }
+        );
+
+        await Class.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Class deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error deleting class' });
+    }
+});
+
+// --- STUDENT MANAGEMENT ROUTES (NEW) ---
+
+// GET students available for assignment to a class (role=student and not in any class yet, or not in this specific class)
+app.get('/api/classes/:classId/available-students', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const classId = req.params.classId;
+        const availableStudents = await User.find({ 
+            role: 'student',
+            classes: { $ne: classId } // Not currently in this specific class
+        }).select('name email _id');
+        
+        res.json(availableStudents);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching available students: ' + error.message });
+    }
+});
+
+// GET students currently assigned to a class
+app.get('/api/classes/:classId/assigned-students', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const classId = req.params.classId;
+        const classData = await Class.findById(classId).populate('students', 'name email _id');
+        
+        if (!classData) {
+            return res.status(404).json({ error: 'Class not found' });
+        }
+        
+        res.json(classData.students);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching assigned students: ' + error.message });
+    }
+});
+
+// POST to assign a student to a class
+app.post('/api/classes/:classId/students', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const { studentId } = req.body;
+        const classId = req.params.classId;
+
+        // 1. Update Class model: add studentId to students array
+        const updatedClass = await Class.findByIdAndUpdate(
+            classId,
+            { $addToSet: { students: studentId } },
+            { new: true }
+        );
+
+        // 2. Update User model: add classId to classes array for the student
+        await User.findByIdAndUpdate(
+            studentId,
+            { $addToSet: { classes: classId } }
+        );
+
+        res.json({ message: 'Student assigned successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error assigning student: ' + error.message });
+    }
+});
+
+// DELETE to remove a student from a class
+app.delete('/api/classes/:classId/students/:studentId', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const { classId, studentId } = req.params;
+
+        // 1. Update Class model: pull studentId from students array
+        await Class.findByIdAndUpdate(
+            classId,
+            { $pull: { students: studentId } }
+        );
+
+        // 2. Update User model: pull classId from classes array for the student
+        await User.findByIdAndUpdate(
+            studentId,
             { $pull: { classes: classId } }
         );
 
-        // מחק את כל המשימות וההודעות שקשורות לכיתה
-        await Assignment.deleteMany({ class: classId });
-        await Announcement.deleteMany({ class: classId });
+        res.json({ message: 'Student removed successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error removing student: ' + error.message });
+    }
+});
+
+// --- USER ROUTES ---
+app.get('/api/users', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const users = await User.find().select('-password').sort({ name: 1 });
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching users' });
+    }
+});
+
+// --- ANNOUNCEMENT ROUTES ---
+app.post('/api/announcements', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    try {
+        const { title, content, targetClassId, isGlobal } = req.body;
+
+        const newAnnouncement = new Announcement({
+            title,
+            content,
+            targetClass: isGlobal ? null : targetClassId,
+            isGlobal: isGlobal || false,
+            author: req.user.userId
+        });
+
+        await newAnnouncement.save();
+        res.status(201).json(newAnnouncement);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating announcement' });
+    }
+});
+
+app.get('/api/announcements', async (req, res) => {
+    try {
+        let query = { $or: [{ isGlobal: true }] };
         
-        res.json({ message: 'Class deleted successfully' });
+        if (req.user) {
+            // Logged-in users (including students and teachers) see announcements for their classes
+            const user = await User.findById(req.user.userId);
+            if (user && user.classes.length > 0) {
+                query.$or.push({ targetClass: { $in: user.classes } });
+            }
+        }
+        
+        const announcements = await Announcement.find(query)
+            .populate('author', 'name')
+            .populate('targetClass', 'name')
+            .sort({ createdAt: -1 });
+            
+        res.json(announcements);
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting class: ' + error.message });
+        res.status(500).json({ error: 'Error fetching announcements' });
+    }
+});
+
+// --- ASSIGNMENT ROUTES ---
+app.post('/api/assignments', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    try {
+        const { title, description, dueDate, targetClassId } = req.body;
+
+        const newAssignment = new Assignment({
+            title,
+            description,
+            dueDate,
+            targetClass: targetClassId,
+            author: req.user.userId
+        });
+
+        await newAssignment.save();
+        res.status(201).json(newAssignment);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating assignment: ' + error.message });
+    }
+});
+
+app.get('/api/assignments', authenticateToken, async (req, res) => {
+    try {
+        let query = {};
+        
+        if (req.user.role === 'student') {
+            const user = await User.findById(req.user.userId);
+            if (user.classes.length > 0) {
+                query.targetClass = { $in: user.classes };
+            } else {
+                return res.json([]); // Student not in any class, no assignments
+            }
+        } else if (req.user.role === 'teacher') {
+            // Teachers see assignments for classes they teach (assuming they are assigned as teacher)
+            const classesTaught = await Class.find({ teacher: req.user.userId }).select('_id');
+            const classIds = classesTaught.map(c => c._id);
+            query.targetClass = { $in: classIds };
+        } 
+        
+        // Admins see all assignments (default query is empty)
+        
+        const assignments = await Assignment.find(query)
+            .populate('author', 'name')
+            .populate('targetClass', 'name')
+            .sort({ dueDate: 1 });
+            
+        res.json(assignments);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching assignments' });
+    }
+});
+
+// --- EVENT ROUTES ---
+app.post('/api/events', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    try {
+        const { title, description, date, location, targetClassId, isGlobal } = req.body;
+
+        const newEvent = new Event({
+            title,
+            description,
+            date,
+            location,
+            targetClass: isGlobal ? null : targetClassId,
+            isGlobal: isGlobal || false,
+            author: req.user.userId
+        });
+
+        await newEvent.save();
+        res.status(201).json(newEvent);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating event: ' + error.message });
+    }
+});
+
+app.get('/api/events', async (req, res) => {
+    try {
+        let query = { $or: [{ isGlobal: true }] };
+        
+        if (req.user) {
+            // Logged-in users (including students and teachers) see events for their classes
+            const user = await User.findById(req.user.userId);
+            if (user && user.classes.length > 0) {
+                query.$or.push({ targetClass: { $in: user.classes } });
+            }
+        }
+        
+        const events = await Event.find(query)
+            .populate('author', 'name')
+            .populate('targetClass', 'name')
+            .sort({ date: 1 });
+            
+        res.json(events);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching events' });
     }
 });
 
 
-// **נתיבים חדשים: ניהול תלמידים בכיתה (שיוך והסרה)**
-
-// **שיוך תלמיד לכיתה**
-app.post('/api/classes/:classId/students/:studentId', authenticateToken, authorizeRole(['teacher', 'admin']), async (req, res) => {
+// --- MEDIA ROUTES ---
+app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
     try {
-        const { classId, studentId } = req.params;
-
-        const classUpdate = await Class.findByIdAndUpdate(
-            classId,
-            { $addToSet: { students: studentId } }, // הוסף תלמיד לכיתה
-            { new: true }
-        );
-
-        const userUpdate = await User.findByIdAndUpdate(
-            studentId,
-            { $addToSet: { classes: classId } }, // הוסף כיתה למשתמש
-            { new: true }
-        );
-
-        if (!classUpdate || !userUpdate) {
-            return res.status(404).json({ error: 'Class or Student not found' });
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
         }
 
-        res.json({ message: 'Student added to class successfully', class: classUpdate, user: userUpdate });
+        const { title, type, date } = req.body;
+        const fileUrl = `/uploads/${req.file.filename}`;
+        const mediaDate = date || new Date(); 
+
+        const media = new Media({ 
+            title: title || 'ללא כותרת', 
+            type: type || 'file', 
+            url: fileUrl, 
+            date: mediaDate, 
+            author: req.user.userId 
+        });
+        
+        await media.save();
+        res.json(media);
     } catch (error) {
-        res.status(500).json({ error: 'Error adding student to class: ' + error.message });
+        res.status(500).json({ error: 'Error uploading media: ' + error.message });
     }
 });
 
-// **הסרת תלמיד מכיתה**
-app.delete('/api/classes/:classId/students/:studentId', authenticateToken, authorizeRole(['teacher', 'admin']), async (req, res) => {
+app.get('/api/media', async (req, res) => {
     try {
-        const { classId, studentId } = req.params;
-
-        const classUpdate = await Class.findByIdAndUpdate(
-            classId,
-            { $pull: { students: studentId } }, // הסר תלמיד מהכיתה
-            { new: true }
-        );
-
-        const userUpdate = await User.findByIdAndUpdate(
-            studentId,
-            { $pull: { classes: classId } }, // הסר כיתה מרשימת הכיתות של המשתמש
-            { new: true }
-        );
-
-        if (!classUpdate || !userUpdate) {
-            return res.status(404).json({ error: 'Class or Student not found' });
-        }
-
-        res.json({ message: 'Student removed from class successfully', class: classUpdate, user: userUpdate });
+        const mediaItems = await Media.find()
+            .populate('author', 'name')
+            .sort({ date: -1 });
+        res.json(mediaItems);
     } catch (error) {
-        res.status(500).json({ error: 'Error removing student from class: ' + error.message });
+        res.status(500).json({ error: 'Error fetching media' });
     }
 });
 
+app.delete('/api/media/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    await Media.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Deleted' });
+});
 
-// ... (שאר נתיבי ה-API: /api/announcements, /api/assignments, /api/events, /api/media, /api/upload)
 
+// --- STATIC FILES & FALLBACK ---
 
-// נתיב Fallback להגשת קבצים סטטיים
+// Serve files uploaded to /uploads
+app.use('/uploads', express.static(uploadDir));
+
+// Serve static assets from the client directory
+app.use(express.static(path.join(__dirname, 'client')));
+
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
+    res.sendFile(path.join(__dirname, 'client', 'index.html'));
 });
 
-// הפעלת השרת
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected' });
+});
+
+// Start Server
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+});
