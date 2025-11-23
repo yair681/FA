@@ -1,5 +1,5 @@
 // Authentication Manager for MongoDB backend
-export class AuthManager { // ✅ שינוי: הוספת export
+class AuthManager {
     constructor() {
         this.currentUser = null;
         this.token = localStorage.getItem('token');
@@ -61,9 +61,9 @@ export class AuthManager { // ✅ שינוי: הוספת export
 
             if (response.ok) {
                 this.token = data.token;
-                localStorage.setItem('token', this.token);
                 this.currentUser = data.user;
-                console.log('✅ User logged in:', data.user.name);
+                localStorage.setItem('token', this.token);
+                console.log('✅ Login successful:', data.user.name);
                 
                 // Update UI after successful login
                 if (typeof updateUI === 'function') {
@@ -78,23 +78,23 @@ export class AuthManager { // ✅ שינוי: הוספת export
         }
     }
 
-    async register(name, email, password, role = 'student') {
+    async register(userData) {
         try {
             const response = await fetch('/api/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ name, email, password, role })
+                body: JSON.stringify(userData)
             });
 
             const data = await response.json();
 
             if (response.ok) {
                 this.token = data.token;
-                localStorage.setItem('token', this.token);
                 this.currentUser = data.user;
-                console.log('✅ User registered:', data.user.name);
+                localStorage.setItem('token', this.token);
+                console.log('✅ Registration successful:', data.user.name);
                 
                 // Update UI after successful registration
                 if (typeof updateUI === 'function') {
@@ -145,9 +145,8 @@ export class AuthManager { // ✅ שינוי: הוספת export
     }
 
     isAuthenticated() {
-        return !!this.currentUser;
+        return this.currentUser !== null;
     }
 }
 
-// ✅ שמירת מופע גלובלי (window) עבור קבצים המסתמכים על המשתנה הגלובלי
-window.authManager = new AuthManager();
+const authManager = new AuthManager();
