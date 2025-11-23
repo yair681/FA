@@ -35,11 +35,13 @@ const storage = multer.diskStorage({
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        // תמיכה בשמות קבצים בעברית
         const cleanName = file.originalname.replace(/[^a-zA-Z0-9.א-ת\-\_]/g, '_');
         cb(null, uniqueSuffix + '-' + cleanName);
     }
 });
 
+// הגדלת המגבלה ל-100MB
 const upload = multer({ 
     storage: storage,
     limits: { fileSize: 100 * 1024 * 1024 } 
@@ -54,6 +56,7 @@ app.use('/uploads', express.static(uploadDir));
 
 // חיבור ל-MongoDB
 const MONGODB_URI = process.env.MONGODB_URI;
+
 console.log('🔗 Connecting to MongoDB...');
 
 // סכמות MongoDB
@@ -70,7 +73,7 @@ const classSchema = new mongoose.Schema({
   name: { type: String, required: true },
   teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   teachers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], // ברירת מחדל ריק - שיוך ידני בלבד
+  students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   maxStudents: { type: Number, default: 20 },
   createdAt: { type: Date, default: Date.now }
 });
@@ -108,6 +111,7 @@ const eventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// הסרת ה-enum מ-type כדי לאפשר כל סוג קובץ
 const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, required: true }, 
@@ -193,7 +197,6 @@ app.post('/api/register', async (req, res) => {
     if (existingUser) return res.status(400).json({ error: 'User already exists' });
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    // משתמש חדש נוצר ללא שיוך לכיתות
     const user = new User({ name, email, password: hashedPassword, role, classes: [] });
     await user.save();
 
@@ -207,16 +210,22 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+
     const user = await User.findOne({ email });
     if (!user) return res.status(400).json({ error: 'Invalid email or password' });
-    
+
+    if (!user.password) return res.status(500).json({ error: 'User data corrupted' });
+
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) return res.status(400).json({ error: 'Invalid email or password' });
 
     const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
     res.json({ message: 'Login successful', token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('🔥 Login Critical Error:', error);
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 });
 
@@ -232,6 +241,8 @@ app.get('/api/validate-token', authenticateToken, async (req, res) => {
 app.post('/api/change-password', authenticateToken, async (req, res) => {
     try {
       const { newPassword } = req.body;
+      if (!newPassword) return res.status(400).json({ error: 'New password is required' });
+  
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await User.findByIdAndUpdate(req.user.userId, { password: hashedPassword });
       res.json({ message: 'Password changed successfully' });
@@ -242,7 +253,7 @@ app.post('/api/change-password', authenticateToken, async (req, res) => {
 
 // Users
 app.get('/api/users', authenticateToken, async (req, res) => {
-    // ✅ שינוי: מאפשר למורים לגשת כדי שיוכלו לבחור תלמידים להוספה לכיתה
+    // ✅ שינוי: מאפשר גם למורים לגשת (כדי לבחור תלמידים להוספה לכיתה)
     if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
         return res.status(403).json({ error: 'Access denied' });
     }
@@ -255,8 +266,7 @@ app.post('/api/users', authenticateToken, async (req, res) => {
     try {
         const { name, email, password, role } = req.body;
         const hashedPassword = await bcrypt.hash(password, 10);
-        // יצירה ללא שיוך אוטומטי
-        const user = new User({ name, email, password: hashedPassword, role, classes: [] });
+        const user = new User({ name, email, password: hashedPassword, role });
         await user.save();
         res.json({ message: 'User created' });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -292,38 +302,36 @@ app.get('/api/classes', authenticateToken, async (req, res) => {
 app.post('/api/classes', authenticateToken, async (req, res) => {
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     const { name, teachers } = req.body;
-    // יצירת כיתה ללא שיוך אוטומטי של תלמידים (students: [])
     const newClass = new Class({
         name,
         teacher: req.user.userId,
         teachers: [req.user.userId, ...(teachers || [])],
-        students: [] 
+        students: []
     });
     await newClass.save();
     res.json(newClass);
 });
 
-// ✅ עדכון כיתה (כולל הוספה/הסרה של תלמידים)
 app.put('/api/classes/:id', authenticateToken, async (req, res) => {
     try {
         const classToUpdate = await Class.findById(req.params.id);
         if (!classToUpdate) return res.status(404).json({ error: 'Class not found' });
 
-        // ✅ שינוי: מאפשר למורה של הכיתה או לאדמין לערוך אותה
+        // ✅ שינוי: מאפשר למורה של הכיתה לערוך אותה (להוסיף/להסיר תלמידים)
         const isClassTeacher = req.user.role === 'teacher' && (
             classToUpdate.teacher.toString() === req.user.userId || 
             classToUpdate.teachers.map(t => t.toString()).includes(req.user.userId)
         );
 
         if (req.user.role !== 'admin' && !isClassTeacher) {
-            return res.status(403).json({ error: 'Access denied - You can only manage your own classes' });
+            return res.status(403).json({ error: 'Access denied' });
         }
 
         const { name, teachers, students } = req.body;
         
         if (name) classToUpdate.name = name;
         if (teachers) classToUpdate.teachers = teachers;
-        if (students) classToUpdate.students = students; // כאן מתעדכן מערך התלמידים
+        if (students) classToUpdate.students = students;
 
         await classToUpdate.save();
         
@@ -364,6 +372,7 @@ app.get('/api/announcements', async (req, res) => {
         const token = authHeader && authHeader.split(' ')[1];
         let query = { isGlobal: true };
 
+        // שליפת הודעות רלוונטיות למשתמש (כלליות + כיתות שלו)
         if (token) {
             try {
                 const decoded = jwt.verify(token, JWT_SECRET);
@@ -501,7 +510,7 @@ app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
     }
 });
 
-// Events & Media
+// Events
 app.get('/api/events', async (req, res) => {
     const events = await Event.find().populate('author', 'name').sort({ date: 1 });
     res.json(events);
@@ -521,6 +530,7 @@ app.delete('/api/events/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
+// Media
 app.get('/api/media', async (req, res) => {
     const media = await Media.find().populate('author', 'name').sort({ createdAt: -1 });
     res.json(media);
@@ -528,22 +538,29 @@ app.get('/api/media', async (req, res) => {
 
 app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
     try {
-        if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
 
         const { title, type, date } = req.body;
         const fileUrl = `/uploads/${req.file.filename}`;
+        const mediaDate = date || new Date(); 
+
         const media = new Media({ 
             title: title || 'ללא כותרת', 
             type: type || 'file', 
             url: fileUrl, 
-            date: date || new Date(), 
+            date: mediaDate, 
             author: req.user.userId 
         });
+        
         await media.save();
         res.json(media);
     } catch (error) {
-        res.status(500).json({ error: 'Error uploading media' });
+        res.status(500).json({ error: 'Error uploading media: ' + error.message });
     }
 });
 
