@@ -41,7 +41,7 @@ const storage = multer.diskStorage({
     }
 });
 
-// ✅ שינוי: הגדלת המגבלה ל-100MB
+// הגדלת המגבלה ל-100MB
 const upload = multer({ 
     storage: storage,
     limits: { fileSize: 100 * 1024 * 1024 } 
@@ -111,7 +111,7 @@ const eventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// ✅ שינוי: הסרת ה-enum מ-type כדי לאפשר כל סוג קובץ
+// הסרת ה-enum מ-type כדי לאפשר כל סוג קובץ
 const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, required: true }, 
@@ -253,7 +253,10 @@ app.post('/api/change-password', authenticateToken, async (req, res) => {
 
 // Users
 app.get('/api/users', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    // ✅ שינוי: מאפשר גם למורים לגשת (כדי לבחור תלמידים להוספה לכיתה)
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Access denied' });
+    }
     const users = await User.find().select('-password');
     res.json(users);
 });
@@ -310,14 +313,37 @@ app.post('/api/classes', authenticateToken, async (req, res) => {
 });
 
 app.put('/api/classes/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    const { name, teachers, students } = req.body;
-    const updatedClass = await Class.findByIdAndUpdate(
-        req.params.id, 
-        { name, teachers, students }, 
-        { new: true }
-    );
-    res.json(updatedClass);
+    try {
+        const classToUpdate = await Class.findById(req.params.id);
+        if (!classToUpdate) return res.status(404).json({ error: 'Class not found' });
+
+        // ✅ שינוי: מאפשר למורה של הכיתה לערוך אותה (להוסיף/להסיר תלמידים)
+        const isClassTeacher = req.user.role === 'teacher' && (
+            classToUpdate.teacher.toString() === req.user.userId || 
+            classToUpdate.teachers.map(t => t.toString()).includes(req.user.userId)
+        );
+
+        if (req.user.role !== 'admin' && !isClassTeacher) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const { name, teachers, students } = req.body;
+        
+        if (name) classToUpdate.name = name;
+        if (teachers) classToUpdate.teachers = teachers;
+        if (students) classToUpdate.students = students;
+
+        await classToUpdate.save();
+        
+        const populatedClass = await Class.findById(req.params.id)
+            .populate('teacher', 'name email')
+            .populate('teachers', 'name email')
+            .populate('students', 'name email');
+
+        res.json(populatedClass);
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
@@ -346,6 +372,7 @@ app.get('/api/announcements', async (req, res) => {
         const token = authHeader && authHeader.split(' ')[1];
         let query = { isGlobal: true };
 
+        // שליפת הודעות רלוונטיות למשתמש (כלליות + כיתות שלו)
         if (token) {
             try {
                 const decoded = jwt.verify(token, JWT_SECRET);
