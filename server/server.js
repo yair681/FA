@@ -570,10 +570,22 @@ app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
+// -------------------------------------------------------------
+// ⭐️ התיקון: טיפול בבקשות API שלא נמצאו (404)
+// הבלוק הזה תופס כל נתיב שמתחיל ב-/api/ אבל לא תאם לאף נתב שהוגדר קודם,
+// ומחזיר תשובת JSON 404 תקינה.
+app.use('/api', (req, res) => {
+  console.warn(`❌ 404 API Endpoint Not Found: ${req.method} ${req.originalUrl}`);
+  res.status(404).json({ error: `API endpoint not found: ${req.originalUrl}` });
+});
+// -------------------------------------------------------------
+
+// נתב ברירת המחדל - מחזיר את קובץ ה-HTML הראשי עבור כל נתיב אחר (SPA fallback)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
 
+// מטפל שגיאות גלובלי (Error Handler)
 app.use((error, req, res, next) => {
   console.error('🔥 Unhandled error:', error);
   res.status(500).json({ error: 'Internal server error' });
