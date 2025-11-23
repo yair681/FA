@@ -12,7 +12,10 @@ class AuthManager {
         }
         console.log('🔐 Auth Manager initialized');
         
-        // **הוסר הקטע שקרא ל-updateUI כאן**
+        // Update UI after initialization
+        if (typeof updateUI === 'function') {
+            setTimeout(updateUI, 100);
+        }
     }
 
     async validateToken() {
@@ -28,7 +31,10 @@ class AuthManager {
                 this.currentUser = userData;
                 console.log('✅ User validated:', userData.name);
                 
-                // **הוסר הקטע שקרא ל-updateUI כאן**
+                // Update UI after validation
+                if (typeof updateUI === 'function') {
+                    updateUI();
+                }
                 return true;
             } else {
                 this.logout();
@@ -59,7 +65,10 @@ class AuthManager {
                 localStorage.setItem('token', this.token);
                 console.log('✅ Login successful:', data.user.name);
                 
-                // **הוסר הקטע שקרא ל-updateUI כאן**
+                // Update UI after successful login
+                if (typeof updateUI === 'function') {
+                    updateUI();
+                }
                 return { success: true, user: this.currentUser };
             } else {
                 return { success: false, error: data.error };
@@ -87,7 +96,10 @@ class AuthManager {
                 localStorage.setItem('token', this.token);
                 console.log('✅ Registration successful:', data.user.name);
                 
-                // **הוסר הקטע שקרא ל-updateUI כאן**
+                // Update UI after successful registration
+                if (typeof updateUI === 'function') {
+                    updateUI();
+                }
                 return { success: true, user: this.currentUser };
             } else {
                 return { success: false, error: data.error };
@@ -103,7 +115,10 @@ class AuthManager {
         localStorage.removeItem('token');
         console.log('✅ User logged out');
         
-        // **הוסר הקטע שקרא ל-updateUI כאן**
+        // Update UI after logout
+        if (typeof updateUI === 'function') {
+            updateUI();
+        }
         return { success: true };
     }
 
