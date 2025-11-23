@@ -1,5 +1,8 @@
+// ✅ תיקון: ייבוא מפורש של המחלקה AuthManager מהמודול auth.js
+import { AuthManager } from './auth.js'; 
+
 // Database Manager for MongoDB backend
-class DatabaseManager {
+export class DatabaseManager { // ✅ שינוי: הוספת export
     constructor() {
         this.API_BASE = window.location.origin + '/api';
         console.log('📊 Database Manager initialized with base:', this.API_BASE);
@@ -9,7 +12,8 @@ class DatabaseManager {
         try {
             const headers = {
                 'Content-Type': 'application/json',
-                ...(authManager ? authManager.getAuthHeaders() : {}),
+                // ✅ גישה גלובלית ל-authManager (כפי שהוגדר ב-auth.js)
+                ...(window.authManager ? window.authManager.getAuthHeaders() : {}),
                 ...options.headers
             };
 
@@ -22,8 +26,8 @@ class DatabaseManager {
             const response = await fetch(`${this.API_BASE}${endpoint}`, config);
             
             if (response.status === 401) {
-                if (authManager) {
-                    authManager.logout();
+                if (window.authManager) {
+                    window.authManager.logout();
                 } else {
                     localStorage.removeItem('token');
                     window.location.reload();
@@ -43,153 +47,30 @@ class DatabaseManager {
                 console.error('❌ Non-JSON response:', text.substring(0, 200));
                 throw new Error('Server returned HTML instead of JSON. Check if API endpoint exists.');
             }
-
-            const data = await response.json();
             
             if (!response.ok) {
-                throw new Error(data.error || 'Request failed');
+                const errorData = await response.json();
+                throw new Error(errorData.error || response.statusText);
             }
 
-            console.log(`✅ API Success: ${endpoint}`, Array.isArray(data) ? `Array(${data.length})` : data);
-            return data;
+            return await response.json();
         } catch (error) {
-            console.error('❌ API request error:', error.message);
-            
-            // For public endpoints, return empty array instead of throwing error
-            if (this.isPublicEndpoint(endpoint)) {
-                console.log('🔒 Returning empty data for public endpoint after error');
-                return [];
-            }
-            
+            console.error('❌ API Error:', error.message);
             throw error;
         }
     }
 
-    // Check if endpoint is public (doesn't require authentication)
     isPublicEndpoint(endpoint) {
-        const publicEndpoints = [
-            '/announcements',
-            '/events', 
-            '/media',
-            '/health'
-        ];
-        
-        return publicEndpoints.some(publicEndpoint => 
-            endpoint.startsWith(publicEndpoint) && 
-            !endpoint.includes('/api/announcements') // exclude specific API paths if needed
-        );
-    }
-
-    // ===== USERS =====
-    async getUsers() {
-        // מאפשר גם למורים (isTeacher) לקבל את רשימת המשתמשים
-        if (!authManager || !authManager.isAuthenticated()) {
-            console.log('🔒 Authentication required for users list');
-            return [];
-        }
-        
-        // אם המשתמש הוא לא אדמין וגם לא מורה - חוסמים אותו
-        if (!authManager.isAdmin() && !authManager.isTeacher()) {
-             console.log('🔒 Admin or Teacher access required for users list');
-             return [];
-        }
-
-        return this.makeRequest('/users');
-    }
-
-    async createUser(userData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
-            throw new Error('Admin access required');
-        }
-        return this.makeRequest('/users', {
-            method: 'POST',
-            body: JSON.stringify(userData)
-        });
-    }
-
-    async deleteUser(userId) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
-            throw new Error('Admin access required');
-        }
-        return this.makeRequest(`/users/${userId}`, {
-            method: 'DELETE'
-        });
-    }
-
-    // ===== CLASSES =====
-    async getClasses() {
-        if (!authManager || !authManager.isAuthenticated()) {
-            console.log('🔒 Authentication required for classes');
-            return [];
-        }
-        return this.makeRequest('/classes');
-    }
-
-    async getUserClasses() {
-        if (!authManager || !authManager.isAuthenticated()) {
-            return [];
-        }
-        return this.makeRequest('/classes');
-    }
-
-    async createClass(classData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
-            throw new Error('Teacher or admin access required');
-        }
-        return this.makeRequest('/classes', {
-            method: 'POST',
-            body: JSON.stringify(classData)
-        });
-    }
-    
-    // ✅ NEW: פונקציה כללית לעדכון כיתה (לשיוך/הסרת תלמידים ועוד)
-    async updateClass(classId, updateData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
-            throw new Error('Teacher or admin access required');
-        }
-        return this.makeRequest(`/classes/${classId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updateData)
-        });
-    }
-
-    async deleteClass(classId) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
-            throw new Error('Teacher or admin access required');
-        }
-        return this.makeRequest(`/classes/${classId}`, {
-            method: 'DELETE'
-        });
-    }
-
-    // ===== CLASS-SPECIFIC DATA =====
-    async getClassAssignments(classId) {
-        if (!authManager || !authManager.isAuthenticated()) {
-            throw new Error('Authentication required');
-        }
-        return this.makeRequest(`/classes/${classId}/assignments`);
-    }
-
-    async getClassAnnouncements(classId) {
-        if (!authManager || !authManager.isAuthenticated()) {
-            throw new Error('Authentication required');
-        }
-        return this.makeRequest(`/classes/${classId}/announcements`);
+        return endpoint.startsWith('/announcements/global') || endpoint.startsWith('/events');
     }
 
     // ===== ANNOUNCEMENTS =====
     async getAnnouncements() {
-        // Announcements are public - no authentication required
-        try {
-            return await this.makeRequest('/announcements');
-        } catch (error) {
-            console.log('🔒 Returning empty announcements due to auth error');
-            return [];
-        }
+        return this.makeRequest('/announcements');
     }
 
     async createAnnouncement(announcementData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest('/announcements', {
@@ -199,7 +80,7 @@ class DatabaseManager {
     }
 
     async deleteAnnouncement(announcementId) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest(`/announcements/${announcementId}`, {
@@ -207,27 +88,115 @@ class DatabaseManager {
         });
     }
 
+    // ===== USERS (ADMIN ONLY) =====
+    async getUsers() {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isAdmin()) {
+            return []; // לא נזרוק שגיאה אלא נחזיר ריק
+        }
+        return this.makeRequest('/users');
+    }
+
+    async createUser(userData) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isAdmin()) {
+            throw new Error('Admin access required');
+        }
+        return this.makeRequest('/users', {
+            method: 'POST',
+            body: JSON.stringify(userData)
+        });
+    }
+
+    async updateUser(userId, userData) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isAdmin()) {
+            throw new Error('Admin access required');
+        }
+        return this.makeRequest(`/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(userData)
+        });
+    }
+
+    async deleteUser(userId) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isAdmin()) {
+            throw new Error('Admin access required');
+        }
+        return this.makeRequest(`/users/${userId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    async changePassword(currentPassword, newPassword) {
+        if (!window.authManager || !window.authManager.isAuthenticated()) {
+            throw new Error('Authentication required');
+        }
+        return this.makeRequest('/users/change-password', {
+            method: 'POST',
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+    }
+
+    // ===== CLASSES =====
+    async getClasses() {
+        if (!window.authManager || !window.authManager.isAuthenticated()) {
+            console.log('🔒 Authentication required for classes');
+            return [];
+        }
+        return this.makeRequest('/classes');
+    }
+
+    async getUserClasses() {
+        if (!window.authManager || !window.authManager.isAuthenticated()) {
+            return [];
+        }
+        return this.makeRequest('/classes/my');
+    }
+
+    async createClass(classData) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
+            throw new Error('Teacher or admin access required');
+        }
+        return this.makeRequest('/classes', {
+            method: 'POST',
+            body: JSON.stringify(classData)
+        });
+    }
+
+    async updateClass(classId, classData) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
+            throw new Error('Teacher or admin access required');
+        }
+        return this.makeRequest(`/classes/${classId}`, {
+            method: 'PUT',
+            body: JSON.stringify(classData)
+        });
+    }
+
+    async deleteClass(classId) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
+            throw new Error('Teacher or admin access required');
+        }
+        return this.makeRequest(`/classes/${classId}`, {
+            method: 'DELETE'
+        });
+    }
+
     // ===== ASSIGNMENTS =====
     async getAssignments() {
-        if (!authManager || !authManager.isAuthenticated()) {
-            console.log('🔒 Authentication required for assignments');
+        if (!window.authManager || !window.authManager.isAuthenticated()) {
             return [];
         }
-        
-        try {
-            console.log('📚 Fetching assignments for user:', authManager.currentUser?.email);
-            const assignments = await this.makeRequest('/assignments');
-            console.log('✅ Assignments fetched successfully, count:', assignments?.length || 0);
-            return assignments || [];
-        } catch (error) {
-            console.error('❌ Error getting assignments:', error);
-            // Return empty array instead of throwing error for better UX
-            return [];
+        return this.makeRequest('/assignments');
+    }
+
+    async getTeacherAssignments() {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isStudent()) {
+            return this.makeRequest('/assignments/teacher');
         }
+        return [];
     }
 
     async createAssignment(assignmentData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest('/assignments', {
@@ -236,9 +205,8 @@ class DatabaseManager {
         });
     }
 
-    // 🔥 NEW: Update assignment function
     async updateAssignment(assignmentId, assignmentData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest(`/assignments/${assignmentId}`, {
@@ -248,7 +216,7 @@ class DatabaseManager {
     }
 
     async deleteAssignment(assignmentId) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest(`/assignments/${assignmentId}`, {
@@ -258,17 +226,11 @@ class DatabaseManager {
 
     // ===== EVENTS =====
     async getEvents() {
-        // Events are public - no authentication required
-        try {
-            return await this.makeRequest('/events');
-        } catch (error) {
-            console.log('🔒 Returning empty events due to auth error');
-            return [];
-        }
+        return this.makeRequest('/events');
     }
 
     async createEvent(eventData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest('/events', {
@@ -278,7 +240,7 @@ class DatabaseManager {
     }
 
     async deleteEvent(eventId) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         return this.makeRequest(`/events/${eventId}`, {
@@ -286,19 +248,13 @@ class DatabaseManager {
         });
     }
 
-    // ===== MEDIA =====
+    // ===== MEDIA (HISTORY) =====
     async getMedia() {
-        // Media is public - no authentication required
-        try {
-            return await this.makeRequest('/media');
-        } catch (error) {
-            console.log('🔒 Returning empty media due to auth error');
-            return [];
-        }
+        return this.makeRequest('/media');
     }
 
     async createMedia(mediaData) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isTeacher()) {
             throw new Error('Teacher or admin access required');
         }
         // For file uploads, we'll use FormData directly in the UI manager
@@ -306,7 +262,7 @@ class DatabaseManager {
     }
 
     async deleteMedia(mediaId) {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
+        if (!window.authManager || !window.authManager.isAuthenticated() || !window.authManager.isAdmin()) {
             throw new Error('Admin access required');
         }
         return this.makeRequest(`/media/${mediaId}`, {
@@ -337,10 +293,6 @@ class DatabaseManager {
     }
 }
 
-// Create global instance
+// ✅ שמירת מופע גלובלי (window) עבור קבצים המסתמכים על המשתנה הגלובלי
 console.log('🚀 Creating database manager instance...');
 window.dbManager = new DatabaseManager();
-// Create global instance
-const databaseManager = new DatabaseManager();
-window.databaseManager = databaseManager;
-
