@@ -82,10 +82,18 @@ class DatabaseManager {
 
     // ===== USERS =====
     async getUsers() {
-        if (!authManager || !authManager.isAuthenticated() || !authManager.isAdmin()) {
-            console.log('🔒 Admin access required for users list');
+        // מאפשר גם למורים (isTeacher) לקבל את רשימת המשתמשים
+        if (!authManager || !authManager.isAuthenticated()) {
+            console.log('🔒 Authentication required for users list');
             return [];
         }
+        
+        // אם המשתמש הוא לא אדמין וגם לא מורה - חוסמים אותו
+        if (!authManager.isAdmin() && !authManager.isTeacher()) {
+             console.log('🔒 Admin or Teacher access required for users list');
+             return [];
+        }
+
         return this.makeRequest('/users');
     }
 
@@ -131,6 +139,17 @@ class DatabaseManager {
         return this.makeRequest('/classes', {
             method: 'POST',
             body: JSON.stringify(classData)
+        });
+    }
+    
+    // ✅ NEW: פונקציה כללית לעדכון כיתה (לשיוך/הסרת תלמידים ועוד)
+    async updateClass(classId, updateData) {
+        if (!authManager || !authManager.isAuthenticated() || !authManager.isTeacher()) {
+            throw new Error('Teacher or admin access required');
+        }
+        return this.makeRequest(`/classes/${classId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updateData)
         });
     }
 
@@ -320,4 +339,4 @@ class DatabaseManager {
 
 // Create global instance
 console.log('🚀 Creating database manager instance...');
-const dbManager = new DatabaseManager()
+const dbManager = new DatabaseManager();
