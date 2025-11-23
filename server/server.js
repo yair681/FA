@@ -23,7 +23,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 app.use(cors());
 app.use(express.json());
 
-// הגדרת העלאת קבצים (Multer) - אחסון מקומי
+// הגדרת העלאת קבצים (Multer)
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
@@ -35,17 +35,19 @@ const storage = multer.diskStorage({
     },
     filename: function (req, file, cb) {
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.]/g, '_');
+        // תמיכה בשמות קבצים בעברית
+        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.א-ת\-\_]/g, '_');
         cb(null, uniqueSuffix + '-' + cleanName);
     }
 });
 
+// ✅ שינוי: הגדלת המגבלה ל-100MB
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 50 * 1024 * 1024 } // הגבלה ל-50MB
+    limits: { fileSize: 100 * 1024 * 1024 } 
 });
 
-// חשיפת הקבצים הסטטיים
+// חשיפת קבצים סטטיים
 app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
 app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
@@ -109,9 +111,10 @@ const eventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// ✅ שינוי: הסרת ה-enum מ-type כדי לאפשר כל סוג קובץ
 const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
-  type: { type: String, enum: ['image', 'video'], required: true },
+  type: { type: String, required: true }, 
   url: { type: String, required: true },
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   date: { type: Date, default: Date.now }, 
@@ -141,14 +144,13 @@ async function createDefaultUsers() {
         createdAt: new Date()
       });
       await adminUser.save();
-      console.log('✅ Default admin user created: yairfrish2@gmail.com / yair12345');
+      console.log('✅ Default admin user created');
     }
   } catch (error) {
     console.error('❌ Error creating default users:', error);
   }
 }
 
-// חיבור ל-MongoDB ויצירת משתמשים
 mongoose.connect(MONGODB_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB');
@@ -158,7 +160,6 @@ mongoose.connect(MONGODB_URI)
     console.error('❌ MongoDB connection error:', err);
   });
 
-// Middleware לאימות
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -183,12 +184,10 @@ const authenticateToken = async (req, res, next) => {
 
 // --- Routes ---
 
-// Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running' });
 });
 
-// Auth
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -211,32 +210,18 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
-    if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
-    }
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
 
     const user = await User.findOne({ email });
-    if (!user) {
-        return res.status(400).json({ error: 'Invalid email or password' });
-    }
+    if (!user) return res.status(400).json({ error: 'Invalid email or password' });
 
-    if (!user.password) {
-        return res.status(500).json({ error: 'User data corrupted' });
-    }
+    if (!user.password) return res.status(500).json({ error: 'User data corrupted' });
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-        return res.status(400).json({ error: 'Invalid email or password' });
-    }
+    if (!isPasswordValid) return res.status(400).json({ error: 'Invalid email or password' });
 
     const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
-    
-    res.json({ 
-        message: 'Login successful', 
-        token, 
-        user: { id: user._id, name: user.name, email: user.email, role: user.role } 
-    });
+    res.json({ message: 'Login successful', token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
 
   } catch (error) {
     console.error('🔥 Login Critical Error:', error);
@@ -354,48 +339,29 @@ app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) =>
     res.json(announcements);
 });
 
-// ✅ ANNOUNCEMENTS - UPDATED LOGIC
+// Announcements
 app.get('/api/announcements', async (req, res) => {
     try {
-        // בדיקה ידנית של הטוקן (כי זה נתיב חצי-ציבורי)
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1];
-        
-        let query = { isGlobal: true }; // ברירת מחדל: רק הודעות כלליות
+        let query = { isGlobal: true };
 
         if (token) {
             try {
                 const decoded = jwt.verify(token, JWT_SECRET);
                 const userId = decoded.userId;
-
-                // מציאת הכיתות שהמשתמש שייך אליהן
                 const userClasses = await Class.find({
-                    $or: [
-                        { students: userId },
-                        { teachers: userId },
-                        { teacher: userId }
-                    ]
+                    $or: [{ students: userId }, { teachers: userId }, { teacher: userId }]
                 }).select('_id');
-                
                 const classIds = userClasses.map(c => c._id);
-
-                // הודעות כלליות או הודעות לכיתות שלי
-                query = {
-                    $or: [
-                        { isGlobal: true },
-                        { class: { $in: classIds } }
-                    ]
-                };
-            } catch (e) {
-                console.log('Error verifying token for announcements:', e.message);
-            }
+                query = { $or: [{ isGlobal: true }, { class: { $in: classIds } }] };
+            } catch (e) {}
         }
 
         const announcements = await Announcement.find(query)
             .populate('author', 'name')
             .populate('class', 'name')
             .sort({ createdAt: -1 });
-
         res.json(announcements);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -425,20 +391,9 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
         if (req.user.role === 'student') {
             const studentClasses = await Class.find({ students: req.user.userId });
             const classIds = studentClasses.map(c => c._id);
-            
-            if (classIds.length === 0) {
-                assignments = [];
-            } else {
-                assignments = await Assignment.find({ class: { $in: classIds } })
-                    .populate('class', 'name')
-                    .populate('teacher', 'name')
-                    .sort({ dueDate: 1 });
-            }
+            assignments = classIds.length === 0 ? [] : await Assignment.find({ class: { $in: classIds } }).populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
         } else {
-            assignments = await Assignment.find()
-                .populate('class', 'name')
-                .populate('teacher', 'name')
-                .sort({ dueDate: 1 });
+            assignments = await Assignment.find().populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
         }
         res.json(assignments);
     } catch (error) {
@@ -459,7 +414,6 @@ app.post('/api/assignments', authenticateToken, async (req, res) => {
 app.post('/api/assignments/submit', authenticateToken, upload.single('file'), async (req, res) => {
     try {
         const { assignmentId, submission } = req.body;
-        
         const assignment = await Assignment.findById(assignmentId);
         if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
 
@@ -489,7 +443,6 @@ app.post('/api/assignments/submit', authenticateToken, upload.single('file'), as
         await assignment.save();
         res.json({ message: 'Submitted successfully' });
     } catch (error) {
-        console.error(error);
         res.status(500).json({ error: 'Error submitting assignment' });
     }
 });
@@ -561,7 +514,6 @@ app.post('/api/media', authenticateToken, upload.single('file'), async (req, res
         if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
             return res.status(403).json({ error: 'Access denied' });
         }
-        
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
@@ -572,7 +524,7 @@ app.post('/api/media', authenticateToken, upload.single('file'), async (req, res
 
         const media = new Media({ 
             title: title || 'ללא כותרת', 
-            type, 
+            type: type || 'file', 
             url: fileUrl, 
             date: mediaDate, 
             author: req.user.userId 
@@ -581,7 +533,6 @@ app.post('/api/media', authenticateToken, upload.single('file'), async (req, res
         await media.save();
         res.json(media);
     } catch (error) {
-        console.error('Upload Error:', error);
         res.status(500).json({ error: 'Error uploading media: ' + error.message });
     }
 });
@@ -592,12 +543,10 @@ app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
-// Serve index.html for all other routes
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
 });
 
-// Error handling
 app.use((error, req, res, next) => {
   console.error('🔥 Unhandled error:', error);
   res.status(500).json({ error: 'Internal server error' });
@@ -605,6 +554,4 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📁 MongoDB: Connected`);
-  console.log(`📂 Uploads dir: ${uploadDir}`);
 });
