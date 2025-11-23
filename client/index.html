@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <!-- Header -->
     <header>
         <div class="container header-container">
             <div class="logo">
@@ -37,10 +36,8 @@
         </div>
     </header>
 
-    <!-- Main Content -->
     <main>
         <div class="container">
-            <!-- Home Page -->
             <div id="home-page" class="page">
                 <div class="recruitment-section">
                     <h3>מסיימים יסודי ומתלבטים איפה להמשיך שנה הבאה?</h3>
@@ -68,7 +65,6 @@
                 </div>
             </div>
             
-            <!-- Announcements Page -->
             <div id="announcements-page" class="page" style="display:none;">
                 <h2 class="page-title">הודעות</h2>
                 
@@ -84,7 +80,6 @@
                 </div>
             </div>
             
-            <!-- Classes Page -->
             <div id="classes-page" class="page" style="display:none;">
                 <h2 class="page-title">הכיתות שלי</h2>
                 
@@ -100,11 +95,9 @@
                 </div>
             </div>
             
-            <!-- Assignments Page -->
             <div id="assignments-page" class="page" style="display:none;">
                 <h2 class="page-title">משימות</h2>
                 
-                <!-- Student Assignments Section - Visible only to students -->
                 <div id="student-assignments-section" style="display:none;">
                     <div class="card">
                         <div class="card-header">
@@ -117,7 +110,6 @@
                     </div>
                 </div>
                 
-                <!-- Teacher Assignments Section - Visible only to teachers/admins -->
                 <div id="teacher-assignments-section" style="display:none;">
                     <div class="card">
                         <div class="card-header">
@@ -131,7 +123,6 @@
                     </div>
                 </div>
 
-                <!-- Guest Message - Visible only to guests -->
                 <div id="guest-assignments-section" style="display:none;">
                     <div class="card">
                         <div class="card-header">
@@ -145,7 +136,6 @@
                 </div>
             </div>
             
-            <!-- Events Page -->
             <div id="events-page" class="page" style="display:none;">
                 <h2 class="page-title">אירועים</h2>
                 
@@ -161,14 +151,13 @@
                 </div>
             </div>
             
-            <!-- History Page -->
             <div id="history-page" class="page" style="display:none;">
                 <h2 class="page-title">מה היה לנו עד כה</h2>
                 
                 <div class="card">
                     <div class="card-header">
-                        <h2 class="card-title">תמונות וסרטונים</h2>
-                        <button id="add-media-btn" class="btn" style="display:none;">הוספת מדיה</button>
+                        <h2 class="card-title">גלריית מדיה וקבצים</h2>
+                        <button id="add-media-btn" class="btn" style="display:none;">הוספת מדיה/קובץ</button>
                     </div>
                     
                     <div id="media-gallery">
@@ -177,7 +166,6 @@
                 </div>
             </div>
             
-            <!-- Settings Page -->
             <div id="settings-page" class="page" style="display:none;">
                 <h2 class="page-title">הגדרות</h2>
                 
@@ -217,7 +205,6 @@
                 </div>
             </div>
             
-            <!-- Admin Page -->
             <div id="admin-page" class="page" style="display:none;">
                 <h2 class="page-title">ניהול מערכת</h2>
                 
@@ -246,14 +233,12 @@
         </div>
     </main>
 
-    <!-- Footer -->
     <footer>
         <div class="container">
             <p>© 2023 פרחי אהרון - חטיבה. כל הזכויות שמורות.</p>
         </div>
     </footer>
 
-    <!-- Login Modal -->
     <div id="login-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -279,7 +264,6 @@
         </div>
     </div>
 
-    <!-- Add Announcement Modal -->
     <div id="add-announcement-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -309,8 +293,7 @@
                 <div class="form-group" id="class-selection-group" style="display:none;">
                     <label for="announcement-class">בחירת כיתה</label>
                     <select id="announcement-class">
-                        <!-- Classes will be populated dynamically -->
-                    </select>
+                        </select>
                 </div>
                 
                 <button type="submit" class="btn">פרסום הודעה</button>
@@ -318,7 +301,6 @@
         </div>
     </div>
 
-    <!-- Add Assignment Modal -->
     <div id="add-assignment-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -340,8 +322,7 @@
                 <div class="form-group">
                     <label for="assignment-class">כיתה</label>
                     <select id="assignment-class" required>
-                        <!-- Classes will be populated dynamically -->
-                    </select>
+                        </select>
                 </div>
                 
                 <div class="form-group">
@@ -354,7 +335,6 @@
         </div>
     </div>
 
-    <!-- Submit Assignment Modal -->
     <div id="submit-assignment-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -375,8 +355,8 @@
                     <div class="file-upload" id="file-upload-area">
                         <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; margin-bottom: 1rem; color: var(--gray);"></i>
                         <p>גרור קובץ לכאן או לחץ לבחירה</p>
-                        <small>קבצים נתמכים: PDF, Word, תמונות (מקסימום 10MB)</small>
-                        <input type="file" id="submission-file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" style="display: none;">
+                        <small>כל סוגי הקבצים נתמכים (מקסימום 100MB)</small>
+                        <input type="file" id="submission-file" style="display: none;">
                     </div>
                 </div>
                 
@@ -400,7 +380,6 @@
         </div>
     </div>
 
-    <!-- View Submissions Modal -->
     <div id="view-submissions-modal" class="modal">
         <div class="modal-content" style="max-width: 800px;">
             <div class="modal-header">
@@ -414,7 +393,6 @@
         </div>
     </div>
 
-    <!-- Add User Modal -->
     <div id="add-user-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -452,7 +430,6 @@
         </div>
     </div>
 
-    <!-- Add Class Modal -->
     <div id="add-class-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -469,8 +446,7 @@
                 <div class="form-group">
                     <label for="class-teachers">מורים נוספים (אופציונלי)</label>
                     <select id="class-teachers" multiple>
-                        <!-- Teachers will be populated dynamically -->
-                    </select>
+                        </select>
                     <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה מורים</small>
                 </div>
                 
@@ -479,7 +455,6 @@
         </div>
     </div>
 
-    <!-- Edit Class Modal -->
     <div id="edit-class-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -496,16 +471,14 @@
                 <div class="form-group">
                     <label for="edit-class-teachers">מורים</label>
                     <select id="edit-class-teachers" multiple>
-                        <!-- Teachers will be populated dynamically -->
-                    </select>
+                        </select>
                     <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה מורים</small>
                 </div>
                 
                 <div class="form-group">
                     <label for="edit-class-students">תלמידים</label>
                     <select id="edit-class-students" multiple>
-                        <!-- Students will be populated dynamically -->
-                    </select>
+                        </select>
                     <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה תלמידים</small>
                 </div>
                 
@@ -514,7 +487,6 @@
         </div>
     </div>
 
-    <!-- Edit User Modal -->
     <div id="edit-user-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -552,7 +524,6 @@
         </div>
     </div>
 
-    <!-- Add Event Modal -->
     <div id="add-event-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -581,11 +552,10 @@
         </div>
     </div>
 
-    <!-- Add Media Modal -->
     <div id="add-media-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>הוספת מדיה</h2>
+                <h2>הוספת מדיה/קובץ</h2>
                 <button class="close-modal">&times;</button>
             </div>
             
@@ -596,10 +566,11 @@
                 </div>
                 
                 <div class="form-group">
-                    <label for="media-type">סוג מדיה</label>
+                    <label for="media-type">סוג</label>
                     <select id="media-type" required>
                         <option value="image">תמונה</option>
                         <option value="video">סרטון</option>
+                        <option value="file">קובץ כללי (PDF/Word/וכו')</option>
                     </select>
                 </div>
                 
@@ -608,14 +579,13 @@
                     <div class="file-upload" id="media-upload-area">
                         <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; margin-bottom: 1rem; color: var(--gray);"></i>
                         <p>גרור קובץ לכאן או לחץ לבחירה</p>
-                        <small id="media-file-types">תמונות נתמכות: JPG, PNG, GIF (מקסימום 10MB)</small>
-                        <input type="file" id="media-file" accept=".jpg,.jpeg,.png,.gif,.mp4,.mov,.avi" style="display: none;">
+                        <small id="media-file-types">כל סוגי הקבצים נתמכים (מקסימום 100MB)</small>
+                        <input type="file" id="media-file" style="display: none;">
                     </div>
                 </div>
                 
                 <div id="media-preview" class="upload-preview" style="display:none;">
-                    <!-- Preview will be shown here -->
-                </div>
+                    </div>
                 
                 <div class="form-group">
                     <label for="media-date">תאריך</label>
@@ -627,7 +597,6 @@
         </div>
     </div>
 
-    <!-- 🔥 FIX: Load JavaScript files in CORRECT order -->
     <script src="/js/auth.js"></script>
     <script src="/js/database.js"></script>
     <script src="/js/ui.js"></script>
