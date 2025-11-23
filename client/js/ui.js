@@ -1,1190 +1,584 @@
-// UI Manager
-class UIManager {
-    constructor() {
-        this.currentPage = 'home';
-        this.currentAssignmentId = null;
-        this.currentFile = null;
-        this.initEventListeners();
-        
-        // 🔥 חדש: משתנים לשמירת נתונים לצורך ניהול תלמידים
-        this.allUsers = []; 
-        this.currentClassToManage = null;
-    }
-
-    initEventListeners() {
-        // Navigation
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.showPage(link.dataset.page);
-                
-                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-                link.classList.add('active');
-            });
-        });
-
-        // Login/Logout
-        document.getElementById('login-btn').addEventListener('click', () => this.openLoginModal());
-        document.getElementById('logout-btn').addEventListener('click', () => this.logout());
-
-        // Forms
-        document.getElementById('login-form').addEventListener('submit', (e) => this.handleLogin(e));
-
-        // Close modals
-        document.querySelectorAll('.close-modal').forEach(btn => {
-            btn.addEventListener('click', () => this.closeAllModals());
-        });
-
-        // Add buttons
-        document.getElementById('add-announcement-btn')?.addEventListener('click', () => this.openAddAnnouncementModal());
-        document.getElementById('add-global-announcement-btn')?.addEventListener('click', () => this.openAddAnnouncementModal(true));
-        document.getElementById('add-class-btn')?.addEventListener('click', () => this.openAddClassModal());
-        document.getElementById('add-assignment-btn')?.addEventListener('click', () => this.openAddAssignmentModal());
-        document.getElementById('add-event-btn')?.addEventListener('click', () => this.openAddEventModal());
-        document.getElementById('add-media-btn')?.addEventListener('click', () => this.openAddMediaModal());
-
-        // Form submissions
-        document.getElementById('add-announcement-form')?.addEventListener('submit', (e) => this.handleAddAnnouncement(e));
-        document.getElementById('add-class-form')?.addEventListener('submit', (e) => this.handleAddClass(e));
-        document.getElementById('add-assignment-form')?.addEventListener('submit', (e) => this.handleAddAssignment(e));
-        document.getElementById('assignment-submission-form')?.addEventListener('submit', (e) => this.handleSubmitAssignment(e));
-        document.getElementById('add-event-form')?.addEventListener('submit', (e) => this.handleAddEvent(e));
-        document.getElementById('add-media-form')?.addEventListener('submit', (e) => this.handleAddMedia(e));
-        document.getElementById('register-form')?.addEventListener('submit', (e) => this.handleRegister(e));
-        document.getElementById('change-password-form')?.addEventListener('submit', (e) => this.handleChangePassword(e));
-        
-        // File drag and drop for media
-        const mediaUploadArea = document.getElementById('media-upload-area');
-        if (mediaUploadArea) {
-            mediaUploadArea.addEventListener('click', () => document.getElementById('media-file').click());
-            mediaUploadArea.addEventListener('dragover', (e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); });
-            mediaUploadArea.addEventListener('dragleave', (e) => { e.preventDefault(); e.currentTarget.classList.remove('drag-over'); });
-            mediaUploadArea.addEventListener('drop', (e) => this.handleMediaDrop(e));
-            document.getElementById('media-file').addEventListener('change', (e) => this.handleMediaSelect(e));
-        }
-
-        // Grade submission
-        document.getElementById('grade-form')?.addEventListener('submit', (e) => this.handleGradeSubmission(e));
-    }
-
-    async logout() {
-        await authManager.logout();
-        this.showPage('home'); // חוזרים לדף הבית
-        this.showNotification('התנתקת בהצלחה', 'success');
-        this.closeAllModals();
-        updateUI();
-    }
-    
-    // --- Page Rendering ---
-    
-    showPage(page) {
-        this.currentPage = page;
-        document.querySelectorAll('.page').forEach(p => {
-            p.style.display = 'none';
-        });
-        const pageElement = document.getElementById(page + '-page');
-        if (pageElement) {
-            pageElement.style.display = 'block';
-            
-            // טעינת התוכן הרלוונטי
-            if (page === 'announcements') this.renderAnnouncements();
-            if (page === 'classes') this.renderClassesPage();
-            if (page === 'assignments') this.renderAssignmentsPage();
-            if (page === 'events') this.renderEvents();
-            if (page === 'history') this.renderMedia();
-        }
-    }
-
-    // --- Modals ---
-
-    openModal(modalId) {
-        this.closeAllModals();
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.style.display = 'flex';
-        }
-    }
-
-    closeAllModals() {
-        document.querySelectorAll('.modal').forEach(m => {
-            m.style.display = 'none';
-        });
-    }
-
-    openLoginModal() {
-        this.openModal('login-modal');
-    }
-    
-    openRegisterModal() {
-        this.openModal('register-modal');
-    }
-
-    openSettingsModal() {
-        this.openModal('settings-modal');
-    }
-
-    openAddAnnouncementModal(isGlobal = false) {
-        document.getElementById('announcement-global-checkbox').checked = isGlobal;
-        document.getElementById('announcement-class-group').style.display = isGlobal ? 'none' : 'block';
-        
-        // טעינת כיתות רק אם לא גלובלי
-        if (!isGlobal) {
-            this.populateClassesDropdown('announcement-class', 'dbManager.getClasses');
-        }
-        
-        this.openModal('add-announcement-modal');
-    }
-
-    openAddClassModal() {
-        // טעינת מורים לרשימת המורים הנוספים
-        this.populateTeachersList('class-teachers-list');
-        this.openModal('add-class-modal');
-    }
-    
-    openAddAssignmentModal() {
-        this.populateClassesDropdown('assignment-class', 'dbManager.getClasses');
-        this.openModal('add-assignment-modal');
-    }
-    
-    openAddEventModal() {
-        this.openModal('add-event-modal');
-    }
-
-    openAddMediaModal() {
-        this.openModal('add-media-modal');
-    }
-    
-    openAssignmentDetailsModal(assignmentId) {
-        this.currentAssignmentId = assignmentId;
-        this.renderAssignmentDetails(assignmentId);
-        this.openModal('assignment-details-modal');
-    }
-
-    openGradeSubmissionModal(submissionId, assignmentId) {
-        document.getElementById('grade-submission-id').value = submissionId;
-        document.getElementById('grade-assignment-id').value = assignmentId;
-        this.openModal('grade-submission-modal');
-    }
-    
-    // --- Utility Functions ---
-    
-    showNotification(message, type = 'info') {
-        // Create notification element
-        const notification = document.createElement('div');
-        notification.className = `notification notification-${type}`;
-        notification.innerHTML = `
-            <div class="notification-content">
-                <span>${message}</span>
-                <button class="notification-close">&times;</button>
-            </div>
-        `;
-        
-        // Add styles
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${type === 'error' ? 'var(--danger)' : type === 'success' ? 'var(--secondary)' : 'var(--primary)'};
-            color: white;
-            padding: 12px 20px;
-            border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            z-index: 10000;
-            min-width: 300px;
-            text-align: center;
-        `;
-        
-        document.body.appendChild(notification);
-        
-        // Auto remove after 5 seconds
-        setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 5000);
-        
-        // Close on click
-        notification.querySelector('.notification-close').onclick = () => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        };
-    }
-
-    async populateClassesDropdown(elementId, fetchFunction, selectedClassId = null) {
-        const dropdown = document.getElementById(elementId);
-        if (!dropdown) return;
-        
-        dropdown.innerHTML = '<option value="">בחר כיתה</option>';
-
-        try {
-            // קורא את הפונקציה הנדרשת (dbManager.getClasses או dbManager.getUserClasses)
-            const classes = await eval(fetchFunction)(); 
-            
-            classes.forEach(cls => {
-                const option = document.createElement('option');
-                option.value = cls._id;
-                option.textContent = cls.name;
-                if (selectedClassId && selectedClassId === cls._id) {
-                    option.selected = true;
-                }
-                dropdown.appendChild(option);
-            });
-        } catch (error) {
-            console.error('Error populating classes dropdown:', error);
-            this.showNotification('שגיאה בטעינת הכיתות', 'error');
-        }
-    }
-    
-    async populateTeachersList(elementId) {
-        const list = document.getElementById(elementId);
-        if (!list) return;
-        
-        list.innerHTML = '';
-        
-        try {
-            const teachers = await dbManager.getTeachers();
-            
-            teachers.forEach(teacher => {
-                const listItem = document.createElement('div');
-                listItem.className = 'checkbox-item';
-                listItem.innerHTML = `
-                    <input type="checkbox" id="teacher-${teacher._id}" name="teachers" value="${teacher._id}">
-                    <label for="teacher-${teacher._id}">${teacher.name} (${teacher.email})</label>
-                `;
-                list.appendChild(listItem);
-            });
-        } catch (error) {
-            console.error('Error populating teachers list:', error);
-            this.showNotification('שגיאה בטעינת רשימת המורים', 'error');
-        }
-    }
-    
-    // --- Handlers ---
-    
-    async handleLogin(e) { 
-        e.preventDefault();
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-
-        try {
-            const result = await authManager.login(email, password);
-            if (result.success) {
-                this.closeAllModals();
-                this.showNotification('התחברת בהצלחה!', 'success');
-                this.showPage('home');
-            } else {
-                this.showNotification(result.error || 'שגיאת התחברות', 'error');
-            }
-        } catch (error) {
-             this.showNotification('שגיאת תקשורת עם השרת.', 'error');
-        }
-    }
-
-    async handleRegister(e) {
-        e.preventDefault();
-        const name = document.getElementById('register-name').value;
-        const email = document.getElementById('register-email').value;
-        const password = document.getElementById('register-password').value;
-        const role = document.getElementById('register-role').value;
-
-        try {
-            const result = await authManager.register(name, email, password, role);
-            if (result.success) {
-                this.closeAllModals();
-                this.showNotification('נרשמת בהצלחה! התחבר כעת.', 'success');
-                this.openLoginModal();
-            } else {
-                this.showNotification(result.error || 'שגיאת הרשמה', 'error');
-            }
-        } catch (error) {
-             this.showNotification('שגיאת תקשורת עם השרת.', 'error');
-        }
-    }
-
-    async handleChangePassword(e) {
-        e.preventDefault();
-        const newPassword = document.getElementById('new-password').value;
-        const confirmPassword = document.getElementById('confirm-password').value;
-
-        if (newPassword !== confirmPassword) {
-            this.showNotification('הסיסמאות אינן תואמות.', 'error');
-            return;
-        }
-
-        try {
-            await authManager.changePassword(newPassword);
-            this.showNotification('הסיסמה שונתה בהצלחה!', 'success');
-            document.getElementById('change-password-form').reset();
-            this.closeAllModals();
-        } catch (error) {
-            this.showNotification('שגיאה בשינוי סיסמה: ' + error.message, 'error');
-        }
-    }
-    
-    async handleAddAnnouncement(e) { 
-        e.preventDefault();
-        const form = e.target;
-        const title = form.elements['announcement-title'].value;
-        const content = form.elements['announcement-content'].value;
-        const isGlobal = form.elements['announcement-global'].checked;
-        const classId = isGlobal ? null : form.elements['announcement-class'].value;
-        
-        if (!title || !content || (!isGlobal && !classId)) {
-            this.showNotification('נא למלא את כל השדות הנדרשים.', 'error');
-            return;
-        }
-        
-        try {
-            await dbManager.createAnnouncement({ title, content, isGlobal, classId });
-            this.showNotification('ההודעה נוספה בהצלחה.', 'success');
-            this.closeAllModals();
-            this.renderAnnouncements();
-        } catch (error) {
-            this.showNotification('שגיאה בהוספת הודעה: ' + error.message, 'error');
-        }
-    }
-    
-    async handleAddClass(e) { 
-        e.preventDefault();
-        const form = e.target;
-        const name = form.elements['class-name'].value;
-        
-        // אוספים את מזהי המורים הנוספים
-        const selectedTeachers = Array.from(form.elements['teachers'])
-            .filter(checkbox => checkbox.checked)
-            .map(checkbox => checkbox.value);
-            
-        try {
-            await dbManager.createClass({ name, teachers: selectedTeachers });
-            this.showNotification('הכיתה נוצרה בהצלחה!', 'success');
-            this.closeAllModals();
-            this.renderClassesPage();
-        } catch (error) {
-            this.showNotification('שגיאה ביצירת כיתה: ' + error.message, 'error');
-        }
-    }
-
-    async handleDeleteClass(classId) {
-        if (!confirm('האם אתה בטוח שברצונך למחוק כיתה זו?')) return;
-
-        try {
-            await dbManager.deleteClass(classId);
-            this.showNotification('הכיתה נמחקה בהצלחה.', 'success');
-            this.renderClassesPage();
-        } catch (error) {
-            this.showNotification('שגיאה במחיקת כיתה: ' + error.message, 'error');
-        }
-    }
-
-    async handleAddAssignment(e) { 
-        e.preventDefault();
-        const form = e.target;
-        const title = form.elements['assignment-title'].value;
-        const description = form.elements['assignment-description'].value;
-        const classId = form.elements['assignment-class'].value;
-        const dueDate = form.elements['assignment-due-date'].value;
-        
-        if (!title || !description || !classId || !dueDate) {
-            this.showNotification('נא למלא את כל שדות המשימה.', 'error');
-            return;
-        }
-
-        try {
-            await dbManager.createAssignment({ title, description, classId, dueDate });
-            this.showNotification('המשימה נוספה בהצלחה.', 'success');
-            this.closeAllModals();
-            this.renderAssignmentsPage();
-        } catch (error) {
-            this.showNotification('שגיאה בהוספת משימה: ' + error.message, 'error');
-        }
-    }
-    
-    async handleSubmitAssignment(e) { 
-        e.preventDefault();
-        const form = e.target;
-        const assignmentId = this.currentAssignmentId;
-        const submissionText = form.elements['submission-text'].value;
-        const fileInput = form.elements['submission-file'];
-
-        if (!assignmentId || (!submissionText && !fileInput.files[0])) {
-            this.showNotification('יש להזין טקסט או לצרף קובץ.', 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('assignmentId', assignmentId);
-        formData.append('submission', submissionText);
-        if (fileInput.files[0]) {
-            formData.append('file', fileInput.files[0]);
-        }
-
-        try {
-            const token = authManager.token;
-            const response = await fetch('/api/assignments/submit', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                    // FormData handles Content-Type for file uploads
-                },
-                body: formData
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                 throw new Error(data.error || 'Submission failed');
-            }
-
-            this.showNotification('ההגשה נשלחה בהצלחה.', 'success');
-            this.closeAllModals();
-            // רנדור מחדש של פרטי המשימה
-            this.renderAssignmentDetails(assignmentId); 
-            this.renderAssignmentsPage();
-
-        } catch (error) {
-            console.error('Submission Error:', error);
-            this.showNotification('שגיאה בהגשת משימה: ' + error.message, 'error');
-        }
-    }
-
-    async handleGradeSubmission(e) {
-        e.preventDefault();
-        const form = e.target;
-        const submissionId = form.elements['grade-submission-id'].value;
-        const assignmentId = form.elements['grade-assignment-id'].value;
-        const grade = form.elements['submission-grade'].value;
-        const remarks = form.elements['submission-remarks'].value;
-        
-        const fullGrade = `${grade} (${remarks})`;
-
-        try {
-            const token = authManager.token;
-            const response = await fetch(`/api/assignments/grade/${submissionId}`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ grade: fullGrade })
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-                 throw new Error(data.error || 'Grading failed');
-            }
-            
-            this.showNotification('הציון נשמר בהצלחה.', 'success');
-            this.closeAllModals();
-            this.renderAssignmentDetails(assignmentId);
-
-        } catch (error) {
-            this.showNotification('שגיאה בשמירת ציון: ' + error.message, 'error');
-        }
-    }
-
-    async handleAddEvent(e) { 
-        e.preventDefault();
-        const form = e.target;
-        const title = form.elements['event-title'].value;
-        const description = form.elements['event-description'].value;
-        const date = form.elements['event-date'].value;
-
-        if (!title || !description || !date) {
-            this.showNotification('נא למלא את כל שדות האירוע.', 'error');
-            return;
-        }
-        
-        try {
-            await dbManager.createEvent({ title, description, date });
-            this.showNotification('האירוע נוסף בהצלחה.', 'success');
-            this.closeAllModals();
-            this.renderEvents();
-        } catch (error) {
-            this.showNotification('שגיאה בהוספת אירוע: ' + error.message, 'error');
-        }
-    }
-
-    async handleAddMedia(e) { 
-        e.preventDefault();
-        const form = e.target;
-        const title = form.elements['media-title'].value;
-        const type = form.elements['media-type'].value;
-        const date = form.elements['media-date'].value;
-        const fileInput = document.getElementById('media-file');
-        
-        if (!title || !type || !date || !fileInput.files[0]) {
-            this.showNotification('נא למלא את כל שדות המדיה ולצרף קובץ.', 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('title', title);
-        formData.append('type', type);
-        formData.append('date', date);
-        formData.append('file', fileInput.files[0]);
-
-        try {
-            const token = authManager.token;
-            const response = await fetch('/api/media', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                },
-                body: formData
-            });
-
-            const data = await response.json();
-            if (!response.ok) {
-                 throw new Error(data.error || 'Upload failed');
-            }
-
-            this.showNotification('הקובץ הועלה בהצלחה.', 'success');
-            this.closeAllModals();
-            this.renderMedia();
-        } catch (error) {
-            console.error('Upload Error:', error);
-            this.showNotification('שגיאה בהעלאת מדיה: ' + error.message, 'error');
-        }
-    }
-
-    handleMediaDrop(e) {
-        e.preventDefault();
-        e.currentTarget.classList.remove('drag-over');
-        const file = e.dataTransfer.files[0];
-        if (file) {
-            document.getElementById('media-file').files = e.dataTransfer.files;
-            this.handleMediaSelect({ target: { files: [file] } });
-        }
-    }
-
-    handleMediaSelect(e) {
-        const file = e.target.files[0];
-        const preview = document.getElementById('media-preview');
-        preview.innerHTML = '';
-
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                let element;
-                if (file.type.startsWith('image/')) {
-                    element = document.createElement('img');
-                    element.src = event.target.result;
-                } else if (file.type.startsWith('video/')) {
-                    element = document.createElement('video');
-                    element.src = event.target.result;
-                    element.controls = true;
-                } else {
-                    element = document.createElement('p');
-                    element.textContent = `קובץ מצורף: ${file.name}`;
-                }
-                
-                element.style.maxWidth = '100%';
-                element.style.maxHeight = '150px';
-                element.style.objectFit = 'contain';
-                element.style.borderRadius = '4px';
-
-                preview.appendChild(element);
-                document.getElementById('media-upload-area').style.display = 'none';
-                preview.style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        } else {
-            document.getElementById('media-upload-area').style.display = 'flex';
-            preview.style.display = 'none';
-        }
-    }
-
-    // --- Class Page ---
-
-    async renderClassesPage() {
-        const classesList = document.getElementById('classes-list');
-        classesList.innerHTML = '<p class="loading-text">טוען כיתות...</p>';
-
-        try {
-            const classes = await dbManager.getClasses();
-            classesList.innerHTML = '';
-
-            if (classes.length === 0) {
-                classesList.innerHTML = '<p class="empty-list">טרם נוצרו כיתות במערכת.</p>';
-                return;
-            }
-            
-            const isTeacherOrAdmin = authManager.isTeacher();
-
-            classes.forEach(cls => {
-                const classElement = document.createElement('div');
-                classElement.className = 'card class-item';
-                
-                const studentCount = cls.students ? cls.students.length : 0;
-                
-                let actionButtons = '';
-                if (isTeacherOrAdmin) {
-                    // ✅ כפתור ניהול תלמידים חדש
-                    actionButtons += `
-                        <button class="btn btn-sm btn-info" onclick="uiManager.openManageStudentsModal('${cls._id}')" title="ניהול תלמידים">
-                            <i class="fas fa-user-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-danger delete-class-btn" data-id="${cls._id}" title="מחיקת כיתה">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
-
-                classElement.innerHTML = `
-                    <div class="card-header">
-                        <h2>${cls.name}</h2>
-                        <div class="actions">${actionButtons}</div>
-                    </div>
-                    <div class="card-body">
-                        <p><strong>מורה ראשי:</strong> ${cls.teacher.name}</p>
-                        <p><strong>מורים נוספים:</strong> ${cls.teachers.map(t => t.name).join(', ') || 'אין'}</p>
-                        <p><strong>מספר תלמידים:</strong> ${studentCount} / ${cls.maxStudents}</p>
-                        <ul class="student-list" style="max-height: 150px; overflow-y: auto;">
-                            ${cls.students.length > 0 ? cls.students.map(s => `<li>${s.name} (${s.email})</li>`).join('') : '<li>אין תלמידים משויכים כרגע.</li>'}
-                        </ul>
-                    </div>
-                `;
-                classesList.appendChild(classElement);
-            });
-            
-            // Event listeners for delete buttons
-            document.querySelectorAll('.delete-class-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => this.handleDeleteClass(e.currentTarget.dataset.id));
-            });
-
-        } catch (error) {
-            console.error('Error rendering classes:', error);
-            classesList.innerHTML = '<p class="error-text">שגיאה בטעינת הכיתות.</p>';
-        }
-    }
-    
-    // --- Student Management Modal (NEW) ---
-
-    // פתיחת מודאל ניהול תלמידים לכיתה ספציפית
-    async openManageStudentsModal(classId) {
-        this.openModal('manage-students-modal');
-        const modalTitle = document.getElementById('manage-students-modal-title');
-        const studentsInClassList = document.getElementById('students-in-class-list');
-        const availableStudentsList = document.getElementById('available-students-list');
-        
-        modalTitle.textContent = 'טוען...';
-        studentsInClassList.innerHTML = '<p>טוען תלמידים משויכים...</p>';
-        availableStudentsList.innerHTML = '<p>טוען תלמידים זמינים...</p>';
-
-        try {
-            // 1. טעינת כל המשתמשים (רק אם לא נטענו כבר)
-            if (this.allUsers.length === 0) {
-                const allUsers = await dbManager.getUsers();
-                // שומרים רק משתמשים שהם תלמידים
-                this.allUsers = allUsers.filter(u => u.role === 'student'); 
-            }
-            
-            // 2. טעינת פרטי הכיתה הנוכחית (שנוכל לקבל את רשימת התלמידים העדכנית)
-            const classes = await dbManager.getClasses(); // קוראים את הכל כדי למצוא את הנוכחית
-            const currentClass = classes.find(c => c._id === classId);
-            this.currentClassToManage = currentClass;
-
-            if (!currentClass) {
-                throw new Error('Class not found');
-            }
-            
-            modalTitle.textContent = `ניהול תלמידים: ${currentClass.name}`;
-            
-            // רשימת מזהי התלמידים שכבר משויכים
-            const studentIdsInClass = currentClass.students.map(s => s._id); 
-            
-            // סינון לרשימות: תלמידים משויכים ותלמידים זמינים
-            const studentsInClass = this.allUsers.filter(u => studentIdsInClass.includes(u._id));
-            const availableStudents = this.allUsers.filter(u => !studentIdsInClass.includes(u._id));
-            
-            // 3. הצגת תלמידים משויכים (עם כפתור הסרה)
-            studentsInClassList.innerHTML = studentsInClass.length > 0 
-                ? studentsInClass.map(s => `
-                    <div class="list-item student-item">
-                        <span>${s.name} (${s.email})</span>
-                        <button class="btn btn-sm btn-danger" onclick="uiManager.handleStudentAction('${currentClass._id}', '${s._id}', 'remove')">הסר</button>
-                    </div>
-                `).join('')
-                : '<p class="empty-list">אין תלמידים בכיתה זו.</p>';
-                
-            // 4. הצגת תלמידים זמינים (עם כפתור הוספה)
-            availableStudentsList.innerHTML = availableStudents.length > 0
-                ? availableStudents.map(s => `
-                    <div class="list-item student-item">
-                        <span>${s.name} (${s.email})</span>
-                        <button class="btn btn-sm btn-secondary" onclick="uiManager.handleStudentAction('${currentClass._id}', '${s._id}', 'add')">הוסף</button>
-                    </div>
-                `).join('')
-                : '<p class="empty-list">כל התלמידים משויכים או שאין תלמידים במערכת.</p>';
-
-        } catch (error) {
-            console.error('Error rendering manage students modal:', error);
-            this.showNotification(`שגיאה בטעינת נתוני ניהול: ${error.message}`, 'error');
-            studentsInClassList.innerHTML = '';
-            availableStudentsList.innerHTML = '';
-        }
-    }
-
-    // טיפול בהוספה/הסרה של תלמיד
-    async handleStudentAction(classId, studentId, action) {
-        if (!this.currentClassToManage || this.currentClassToManage._id !== classId) {
-             this.showNotification('שגיאה: נתוני הכיתה אינם טעונים כראוי.', 'error');
-             return;
-        }
-
-        const currentStudents = this.currentClassToManage.students.map(s => s._id);
-        let newStudentsList;
-        
-        if (action === 'add') {
-            if (currentStudents.includes(studentId)) return; // כבר קיים
-            newStudentsList = [...currentStudents, studentId];
-        } else if (action === 'remove') {
-            newStudentsList = currentStudents.filter(id => id !== studentId);
-        } else {
-            return;
-        }
-        
-        try {
-            const result = await dbManager.updateClass(classId, { students: newStudentsList });
-            
-            // עדכון המשתנים המקומיים לאחר הצלחה
-            this.currentClassToManage = result;
-            
-            this.showNotification(`התלמיד ${action === 'add' ? 'הוסף' : 'הוסר'} בהצלחה.`, 'success');
-            
-            // טעינה מחדש של המודאל כדי לשקף את השינוי
-            this.openManageStudentsModal(classId); 
-            // עדכון דף הכיתות ברקע
-            this.renderClassesPage();
-
-        } catch (error) {
-            console.error('Error updating students list:', error);
-            this.showNotification(`שגיאה ב${action === 'add' ? 'הוספת' : 'הסרת'} תלמיד: ${error.message}`, 'error');
-        }
-    }
-    
-    // --- Assignment Submission Details ---
-    
-    async renderAssignmentDetails(assignmentId) {
-        const detailsContainer = document.getElementById('assignment-details-content');
-        detailsContainer.innerHTML = '<p class="loading-text">טוען פרטי משימה...</p>';
-        
-        try {
-            const allAssignments = await dbManager.getAssignments();
-            const assignment = allAssignments.find(a => a._id === assignmentId);
-            
-            if (!assignment) {
-                detailsContainer.innerHTML = '<p class="error-text">המשימה לא נמצאה.</p>';
-                return;
-            }
-
-            const isTeacher = authManager.isTeacher();
-            const currentUser = authManager.currentUser;
-            
-            let submissionFormHTML = '';
-            let submissionsListHTML = '';
-            let userSubmission = null;
-
-            if (currentUser) {
-                 userSubmission = assignment.submissions.find(s => s.student.toString() === currentUser.id);
-            }
-            
-            const now = new Date();
-            const dueDate = new Date(assignment.dueDate);
-            const isLate = now > dueDate;
-            
-            // עבור תלמידים: הצגת טופס הגשה או סטטוס הגשה
-            if (authManager.isStudent()) {
-                if (isLate && !userSubmission) {
-                    submissionFormHTML = '<p class="text-danger">מועד ההגשה עבר ולא הוגשה עבודה.</p>';
-                } else if (userSubmission) {
-                    const gradeInfo = userSubmission.grade ? `<span class="badge badge-success">${userSubmission.grade}</span>` : '<span class="badge badge-warning">טרם נבדק</span>';
-                    submissionFormHTML = `
-                        <h3>סטטוס הגשה</h3>
-                        <p><strong>הוגש ב:</strong> ${new Date(userSubmission.submittedAt).toLocaleString('he-IL')}</p>
-                        <p><strong>ציון:</strong> ${gradeInfo}</p>
-                        <p><strong>תוכן הגשה:</strong> ${userSubmission.submission || 'ללא טקסט'}</p>
-                        ${userSubmission.fileUrl ? `<p><strong>קובץ מצורף:</strong> <a href="${userSubmission.fileUrl}" target="_blank" class="btn btn-sm btn-primary">הורד קובץ</a></p>` : ''}
-                        <hr>
-                        <p class="text-info">ניתן לשלוח מחדש כדי לעדכן את ההגשה.</p>
-                        ${isLate && !userSubmission ? '' : `
-                            <form id="assignment-submission-form" style="margin-top: 1rem;">
-                                <h3>עדכון הגשה</h3>
-                                <div class="form-group">
-                                    <label for="submission-text">הגשה (טקסט):</label>
-                                    <textarea id="submission-text" name="submission-text" rows="4">${userSubmission.submission || ''}</textarea>
-                                </div>
-                                <div class="form-group">
-                                    <label for="submission-file">קובץ מצורף (עדכון):</label>
-                                    <input type="file" id="submission-file" name="submission-file">
-                                </div>
-                                <button type="submit" class="btn btn-secondary">עדכון הגשה</button>
-                            </form>
-                        `}
-                    `;
-                } else {
-                    submissionFormHTML = `
-                        <form id="assignment-submission-form">
-                            <h3>הגשת משימה</h3>
-                            <div class="form-group">
-                                <label for="submission-text">הגשה (טקסט):</label>
-                                <textarea id="submission-text" name="submission-text" rows="4" placeholder="הכנס כאן את תוכן המשימה..."></textarea>
-                            </div>
-                            <div class="form-group">
-                                <label for="submission-file">קובץ מצורף:</label>
-                                <input type="file" id="submission-file" name="submission-file">
-                            </div>
-                            <button type="submit" class="btn btn-primary">שלח הגשה</button>
-                        </form>
-                    `;
-                }
-            } 
-            
-            // עבור מורים/מנהלים: הצגת רשימת הגשות
-            if (isTeacher) {
-                submissionsListHTML = `
-                    <h3>הגשות (סה"כ: ${assignment.submissions.length})</h3>
-                    <div class="submissions-list list-manager-container">
-                        ${assignment.submissions.length > 0 ? assignment.submissions.map(sub => `
-                            <div class="list-item">
-                                <span>
-                                    <strong>${sub.student.name}</strong> (${new Date(sub.submittedAt).toLocaleDateString('he-IL')}) - 
-                                    ${sub.grade ? `ציון: <span class="badge badge-success">${sub.grade}</span>` : 'טרם נבדק'}
-                                </span>
-                                <div class="actions">
-                                    <button class="btn btn-sm btn-secondary" onclick="uiManager.openSubmissionContentModal('${sub._id}')" title="צפייה בהגשה">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-primary" onclick="uiManager.openGradeSubmissionModal('${sub._id}', '${assignmentId}')" title="מתן ציון">
-                                        <i class="fas fa-award"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        `).join('') : '<p>טרם הוגשו משימות.</p>'}
-                    </div>
-                `;
-            }
-
-            // רנדור ראשי
-            detailsContainer.innerHTML = `
-                <h2>${assignment.title}</h2>
-                <p><strong>כיתה:</strong> ${assignment.class.name}</p>
-                <p><strong>מורה:</strong> ${assignment.teacher.name}</p>
-                <p><strong>תאריך יעד:</strong> ${new Date(assignment.dueDate).toLocaleString('he-IL')}</p>
-                <hr>
-                <p>${assignment.description.replace(/\n/g, '<br>')}</p>
-                <hr>
-                
-                ${isTeacher ? submissionsListHTML : submissionFormHTML}
-            `;
-            
-            // אם מדובר בטופס הגשה חדש או עדכון, יש להוסיף Event Listener
-            if (document.getElementById('assignment-submission-form')) {
-                document.getElementById('assignment-submission-form').addEventListener('submit', (e) => this.handleSubmitAssignment(e));
-            }
-
-        } catch (error) {
-            console.error('Error rendering assignment details:', error);
-            detailsContainer.innerHTML = `<p class="error-text">שגיאה בטעינת פרטי המשימה: ${error.message}</p>`;
-        }
-    }
-    
-    openSubmissionContentModal(submissionId) {
-        const modal = document.getElementById('submission-content-modal');
-        const contentDiv = document.getElementById('submission-content-data');
-        contentDiv.innerHTML = '<p class="loading-text">טוען תוכן הגשה...</p>';
-        this.openModal('submission-content-modal');
-
-        const assignment = dbManager.allAssignments.find(a => a._id === this.currentAssignmentId);
-        if (!assignment) {
-            contentDiv.innerHTML = '<p class="error-text">שגיאה: משימה לא נמצאה.</p>';
-            return;
-        }
-
-        const submission = assignment.submissions.find(s => s._id === submissionId);
-        if (!submission) {
-            contentDiv.innerHTML = '<p class="error-text">שגיאה: הגשה לא נמצאה.</p>';
-            return;
-        }
-
-        contentDiv.innerHTML = `
-            <h3>הגשת התלמיד: ${submission.student.name}</h3>
-            <p><strong>הוגש ב:</strong> ${new Date(submission.submittedAt).toLocaleString('he-IL')}</p>
-            <p><strong>ציון:</strong> ${submission.grade || 'טרם נבדק'}</p>
-            <hr>
-            <h4>תוכן טקסטואלי:</h4>
-            <div class="content-box">
-                ${submission.submission.replace(/\n/g, '<br>') || '<p style="color:var(--gray);">אין תוכן טקסטואלי.</p>'}
-            </div>
-            ${submission.fileUrl ? `
-                <h4 style="margin-top: 1rem;">קובץ מצורף:</h4>
-                <a href="${submission.fileUrl}" target="_blank" class="btn btn-secondary">
-                    <i class="fas fa-download"></i> הורד קובץ
-                </a>
-            ` : ''}
-        `;
-    }
-    
-    // --- Render Functions (Announcements, Assignments, Events, Media) ---
-
-    async renderAnnouncements() {
-        const announcementsList = document.getElementById('announcements-list');
-        announcementsList.innerHTML = '<p class="loading-text">טוען הודעות...</p>';
-        
-        try {
-            const announcements = await dbManager.getAnnouncements();
-            announcementsList.innerHTML = '';
-            
-            if (announcements.length === 0) {
-                 announcementsList.innerHTML = '<p class="empty-list">אין הודעות להצגה כרגע.</p>';
-                 return;
-            }
-
-            announcements.forEach(ann => {
-                const isGlobal = ann.isGlobal;
-                const targetText = isGlobal ? 'הודעה גלובלית' : `כיתה: ${ann.class ? ann.class.name : 'לא ידוע'}`;
-                
-                const annElement = document.createElement('div');
-                annElement.className = `card announcement-item ${isGlobal ? 'global' : 'class'}`;
-                
-                let actionButton = '';
-                if (authManager.isTeacher()) {
-                    actionButton = `
-                        <button class="btn btn-sm btn-danger" onclick="uiManager.handleDeleteAnnouncement('${ann._id}')" title="מחיקת הודעה">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
-
-                annElement.innerHTML = `
-                    <div class="card-header">
-                        <h2>${ann.title}</h2>
-                        <div class="actions">${actionButton}</div>
-                    </div>
-                    <div class="card-body">
-                        <p>${ann.content}</p>
-                        <small>פורסם על ידי: ${ann.author.name} | יעד: ${targetText} | בתאריך: ${new Date(ann.createdAt).toLocaleDateString('he-IL')}</small>
-                    </div>
-                `;
-                announcementsList.appendChild(annElement);
-            });
-            
-        } catch (error) {
-            console.error('Error rendering announcements:', error);
-            announcementsList.innerHTML = '<p class="error-text">שגיאה בטעינת ההודעות.</p>';
-        }
-    }
-
-    async handleDeleteAnnouncement(announcementId) {
-        if (!confirm('האם אתה בטוח שברצונך למחוק הודעה זו?')) return;
-        
-        try {
-            await dbManager.deleteAnnouncement(announcementId);
-            this.showNotification('ההודעה נמחקה בהצלחה.', 'success');
-            this.renderAnnouncements();
-        } catch (error) {
-            this.showNotification('שגיאה במחיקת הודעה: ' + error.message, 'error');
-        }
-    }
-    
-    async renderAssignmentsPage() {
-        const assignmentsList = document.getElementById('assignments-list');
-        assignmentsList.innerHTML = '<p class="loading-text">טוען משימות...</p>';
-        
-        try {
-            const assignments = await dbManager.getAssignments();
-            dbManager.allAssignments = assignments; // שמירה לעיון בפרטים
-            assignmentsList.innerHTML = '';
-
-            if (assignments.length === 0) {
-                 assignmentsList.innerHTML = '<p class="empty-list">אין משימות להצגה כרגע.</p>';
-                 return;
-            }
-            
-            assignments.forEach(assignment => {
-                const assignmentElement = document.createElement('div');
-                assignmentElement.className = 'card assignment-item';
-                
-                let actionButtons = '';
-                if (authManager.isTeacher()) {
-                    actionButtons = `
-                        <button class="btn btn-sm btn-danger" onclick="uiManager.handleDeleteAssignment('${assignment._id}')" title="מחיקת משימה">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
-                
-                assignmentElement.innerHTML = `
-                    <div class="card-header">
-                        <h2>${assignment.title}</h2>
-                        <div class="actions">
-                            <button class="btn btn-sm btn-primary" onclick="uiManager.openAssignmentDetailsModal('${assignment._id}')" title="פרטים/הגשה">
-                                <i class="fas fa-file-alt"></i>
-                            </button>
-                            ${actionButtons}
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <p><strong>כיתה:</strong> ${assignment.class.name}</p>
-                        <p><strong>תאריך יעד:</strong> ${new Date(assignment.dueDate).toLocaleDateString('he-IL')}</p>
-                        <p class="description-snippet">${assignment.description.substring(0, 100)}${assignment.description.length > 100 ? '...' : ''}</p>
-                    </div>
-                `;
-                assignmentsList.appendChild(assignmentElement);
-            });
-
-        } catch (error) {
-             console.error('Error rendering assignments:', error);
-             assignmentsList.innerHTML = '<p class="error-text">שגיאה בטעינת המשימות.</p>';
-        }
-    }
-
-    async handleDeleteAssignment(assignmentId) {
-        if (!confirm('האם אתה בטוח שברצונך למחוק משימה זו?')) return;
-        
-        try {
-            await dbManager.deleteAssignment(assignmentId);
-            this.showNotification('המשימה נמחקה בהצלחה.', 'success');
-            this.renderAssignmentsPage();
-        } catch (error) {
-            this.showNotification('שגיאה במחיקת משימה: ' + error.message, 'error');
-        }
-    }
-    
-    async renderEvents() {
-        const eventsList = document.getElementById('events-list');
-        eventsList.innerHTML = '<p class="loading-text">טוען אירועים...</p>';
-        
-        try {
-            const events = await dbManager.getEvents();
-            eventsList.innerHTML = '';
-
-            if (events.length === 0) {
-                 eventsList.innerHTML = '<p class="empty-list">אין אירועים קרובים להצגה.</p>';
-                 return;
-            }
-
-            events.forEach(event => {
-                const eventElement = document.createElement('div');
-                eventElement.className = 'card event-item';
-                
-                let actionButton = '';
-                if (authManager.isTeacher()) {
-                    actionButton = `
-                        <button class="btn btn-sm btn-danger" onclick="uiManager.handleDeleteEvent('${event._id}')" title="מחיקת אירוע">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
-
-                eventElement.innerHTML = `
-                    <div class="card-header">
-                        <h2>${event.title}</h2>
-                        <div class="actions">${actionButton}</div>
-                    </div>
-                    <div class="card-body">
-                        <p><strong>תאריך:</strong> ${new Date(event.date).toLocaleDateString('he-IL')}</p>
-                        <p>${event.description}</p>
-                        <small>פורסם על ידי: ${event.author.name}</small>
-                    </div>
-                `;
-                eventsList.appendChild(eventElement);
-            });
-            
-        } catch (error) {
-            console.error('Error rendering events:', error);
-            eventsList.innerHTML = '<p class="error-text">שגיאה בטעינת האירועים.</p>';
-        }
-    }
-
-    async handleDeleteEvent(eventId) {
-        if (!confirm('האם אתה בטוח שברצונך למחוק אירוע זה?')) return;
-        
-        try {
-            await dbManager.deleteEvent(eventId);
-            this.showNotification('האירוע נמחק בהצלחה.', 'success');
-            this.renderEvents();
-        } catch (error) {
-            this.showNotification('שגיאה במחיקת אירוע: ' + error.message, 'error');
-        }
-    }
-    
-    async renderMedia() {
-        const mediaList = document.getElementById('media-list');
-        mediaList.innerHTML = '<p class="loading-text">טוען פריטי מדיה...</p>';
-        
-        try {
-            const mediaItems = await dbManager.getMedia();
-            mediaList.innerHTML = '';
-
-            if (mediaItems.length === 0) {
-                 mediaList.innerHTML = '<p class="empty-list">אין פריטי מדיה להצגה כרגע.</p>';
-                 return;
-            }
-
-            mediaItems.forEach(item => {
-                const itemElement = document.createElement('div');
-                itemElement.className = 'media-item';
-                
-                let mediaHTML = '';
-                if (item.type.includes('image')) {
-                    mediaHTML = `<img src="${item.url}" alt="${item.title}">`;
-                } else if (item.type.includes('video')) {
-                    mediaHTML = `<video src="${item.url}" controls></video>`;
-                } else {
-                    mediaHTML = `
-                        <div class="file-icon-placeholder">
-                            <i class="fas fa-file-alt"></i>
-                            <a href="${item.url}" target="_blank" class="btn btn-sm btn-primary">הורד</a>
-                        </div>
-                    `;
-                }
-                
-                let deleteButton = '';
-                if (authManager.isAdmin()) {
-                    deleteButton = `
-                        <button class="btn btn-sm btn-danger" onclick="uiManager.handleDeleteMedia('${item._id}')" title="מחיקת מדיה">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
-
-                itemElement.innerHTML = `
-                    ${mediaHTML}
-                    <div class="media-info">
-                        <h3>${item.title}</h3>
-                        <p><small>סוג: ${item.type} | תאריך: ${new Date(item.date).toLocaleDateString('he-IL')}</small></p>
-                        <div class="actions" style="margin-top: 5px;">
-                            <a href="${item.url}" target="_blank" class="btn btn-sm btn-secondary">צפייה</a>
-                            ${deleteButton}
-                        </div>
-                    </div>
-                `;
-                mediaList.appendChild(itemElement);
-            });
-            
-        } catch (error) {
-            console.error('Error rendering media:', error);
-            mediaList.innerHTML = '<p class="error-text">שגיאה בטעינת המדיה.</p>';
-        }
-    }
-    
-    async handleDeleteMedia(mediaId) {
-        if (!confirm('האם אתה בטוח שברצונך למחוק פריט מדיה זה? (מחיקה פיזית של הקובץ מהשרת)')) return;
-        
-        try {
-            await dbManager.deleteMedia(mediaId);
-            this.showNotification('פריט המדיה נמחק בהצלחה.', 'success');
-            this.renderMedia();
-        } catch (error) {
-            this.showNotification('שגיאה במחיקת מדיה: ' + error.message, 'error');
-        }
-    }
+import express from 'express';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
+import fs from 'fs';
+
+// Fix for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 10000;
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// הגדרת העלאת קבצים (Multer)
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Create global instance
-console.log('🚀 Creating UI manager instance...');
-const uiManager = new UIManager();
-window.uiManager = uiManager;
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, uploadDir)
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        // תמיכה בשמות קבצים בעברית
+        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.א-ת\-\_]/g, '_');
+        cb(null, uniqueSuffix + '-' + cleanName);
+    }
+});
+
+// הגדלת המגבלה ל-100MB
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 100 * 1024 * 1024 } 
+});
+
+// חשיפת קבצים סטטיים
+app.use(express.static(path.join(__dirname, '..', 'client')));
+app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
+app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
+app.use('/uploads', express.static(uploadDir));
+
+
+// חיבור ל-MongoDB
+const MONGODB_URI = process.env.MONGODB_URI;
+
+console.log('🔗 Connecting to MongoDB...');
+
+// סכמות MongoDB
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  role: { type: String, enum: ['student', 'teacher', 'admin'], required: true },
+  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Class' }],
+  createdAt: { type: Date, default: Date.now }
+});
+
+const classSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  teachers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  maxStudents: { type: Number, default: 20 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const announcementSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  content: { type: String, required: true },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  isGlobal: { type: Boolean, default: false },
+  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const assignmentSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: true },
+  teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  dueDate: { type: Date, required: true },
+  submissions: [{
+    student: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    submission: String,
+    fileUrl: String,
+    submittedAt: { type: Date, default: Date.now },
+    grade: String
+  }],
+  createdAt: { type: Date, default: Date.now }
+});
+
+const eventSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, required: true },
+  date: { type: Date, required: true },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// הסרת ה-enum מ-type כדי לאפשר כל סוג קובץ
+const mediaSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  type: { type: String, required: true }, 
+  url: { type: String, required: true },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  date: { type: Date, default: Date.now }, 
+  createdAt: { type: Date, default: Date.now }
+});
+
+// מודלים
+const User = mongoose.model('User', userSchema);
+const Class = mongoose.model('Class', classSchema);
+const Announcement = mongoose.model('Announcement', announcementSchema);
+const Assignment = mongoose.model('Assignment', assignmentSchema);
+const Event = mongoose.model('Event', eventSchema);
+const Media = mongoose.model('Media', mediaSchema);
+
+// יצירת משתמש מנהל ברירת מחדל
+async function createDefaultUsers() {
+  try {
+    const existingAdmin = await User.findOne({ email: 'yairfrish2@gmail.com' });
+    if (!existingAdmin) {
+      const hashedPassword = await bcrypt.hash('yair12345', 10);
+      const adminUser = new User({
+        name: 'יאיר פריש',
+        email: 'yairfrish2@gmail.com',
+        password: hashedPassword,
+        role: 'admin',
+        classes: [],
+        createdAt: new Date()
+      });
+      await adminUser.save();
+      console.log('✅ Default admin user created');
+    }
+  } catch (error) {
+    console.error('❌ Error creating default users:', error);
+  }
+}
+
+mongoose.connect(MONGODB_URI)
+  .then(() => {
+    console.log('✅ Connected to MongoDB');
+    createDefaultUsers();
+  })
+  .catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+  });
+
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.status(401).json({ error: 'Access token required' });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId).select('-password');
+    if (!user) return res.status(403).json({ error: 'User not found' });
+
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role
+    };
+    next();
+  } catch (error) {
+    return res.status(403).json({ error: 'Invalid token' });
+  }
+};
+
+// --- Routes ---
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Server is running' });
+});
+
+app.post('/api/register', async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password || !role) return res.status(400).json({ error: 'All fields are required' });
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ error: 'User already exists' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = new User({ name, email, password: hashedPassword, role, classes: [] });
+    await user.save();
+
+    const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
+    res.json({ message: 'User created', token, user: { id: user._id, name, email, role } });
+  } catch (error) {
+    res.status(500).json({ error: 'Error registering user' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ error: 'Invalid email or password' });
+
+    if (!user.password) return res.status(500).json({ error: 'User data corrupted' });
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) return res.status(400).json({ error: 'Invalid email or password' });
+
+    const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
+    res.json({ message: 'Login successful', token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+
+  } catch (error) {
+    console.error('🔥 Login Critical Error:', error);
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
+  }
+});
+
+app.get('/api/validate-token', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.userId).select('-password');
+    res.json({ id: user._id, name: user.name, email: user.email, role: user.role });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/change-password', authenticateToken, async (req, res) => {
+    try {
+      const { newPassword } = req.body;
+      if (!newPassword) return res.status(400).json({ error: 'New password is required' });
+  
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await User.findByIdAndUpdate(req.user.userId, { password: hashedPassword });
+      res.json({ message: 'Password changed successfully' });
+    } catch (error) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Users
+app.get('/api/users', authenticateToken, async (req, res) => {
+    // ✅ שינוי: מאפשר גם למורים לגשת (כדי לבחור תלמידים להוספה לכיתה)
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+        return res.status(403).json({ error: 'Access denied' });
+    }
+    const users = await User.find().select('-password');
+    res.json(users);
+});
+
+app.post('/api/users', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const { name, email, password, role } = req.body;
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = new User({ name, email, password: hashedPassword, role });
+        await user.save();
+        res.json({ message: 'User created' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    try {
+        const { name, email, role, password } = req.body;
+        const updateData = { name, email, role };
+        if (password) updateData.password = await bcrypt.hash(password, 10);
+        
+        const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        res.json({ message: 'User updated', user });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/users/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: 'User deleted' });
+});
+
+// Classes
+app.get('/api/classes', authenticateToken, async (req, res) => {
+    const classes = await Class.find()
+      .populate('teacher', 'name email')
+      .populate('teachers', 'name email')
+      .populate('students', 'name email');
+    res.json(classes);
+});
+
+app.post('/api/classes', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const { name, teachers } = req.body;
+    const newClass = new Class({
+        name,
+        teacher: req.user.userId,
+        teachers: [req.user.userId, ...(teachers || [])],
+        students: []
+    });
+    await newClass.save();
+    res.json(newClass);
+});
+
+app.put('/api/classes/:id', authenticateToken, async (req, res) => {
+    try {
+        const classToUpdate = await Class.findById(req.params.id);
+        if (!classToUpdate) return res.status(404).json({ error: 'Class not found' });
+
+        // ✅ שינוי: מאפשר למורה של הכיתה לערוך אותה (להוסיף/להסיר תלמידים)
+        const isClassTeacher = req.user.role === 'teacher' && (
+            classToUpdate.teacher.toString() === req.user.userId || 
+            classToUpdate.teachers.map(t => t.toString()).includes(req.user.userId)
+        );
+
+        if (req.user.role !== 'admin' && !isClassTeacher) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const { name, teachers, students } = req.body;
+        
+        if (name) classToUpdate.name = name;
+        if (teachers) classToUpdate.teachers = teachers;
+        if (students) classToUpdate.students = students;
+
+        await classToUpdate.save();
+        
+        const populatedClass = await Class.findById(req.params.id)
+            .populate('teacher', 'name email')
+            .populate('teachers', 'name email')
+            .populate('students', 'name email');
+
+        res.json(populatedClass);
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
+});
+
+app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    await Class.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Class deleted' });
+});
+
+// Class specific data
+app.get('/api/classes/:id/assignments', authenticateToken, async (req, res) => {
+    const assignments = await Assignment.find({ class: req.params.id }).populate('class teacher');
+    res.json(assignments);
+});
+
+app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) => {
+    const announcements = await Announcement.find({ 
+        $or: [{ class: req.params.id }, { isGlobal: true }]
+    }).populate('author class').sort({ createdAt: -1 });
+    res.json(announcements);
+});
+
+// Announcements
+app.get('/api/announcements', async (req, res) => {
+    try {
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+        let query = { isGlobal: true };
+
+        // שליפת הודעות רלוונטיות למשתמש (כלליות + כיתות שלו)
+        if (token) {
+            try {
+                const decoded = jwt.verify(token, JWT_SECRET);
+                const userId = decoded.userId;
+                const userClasses = await Class.find({
+                    $or: [{ students: userId }, { teachers: userId }, { teacher: userId }]
+                }).select('_id');
+                const classIds = userClasses.map(c => c._id);
+                query = { $or: [{ isGlobal: true }, { class: { $in: classIds } }] };
+            } catch (e) {}
+        }
+
+        const announcements = await Announcement.find(query)
+            .populate('author', 'name')
+            .populate('class', 'name')
+            .sort({ createdAt: -1 });
+        res.json(announcements);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/announcements', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const { title, content, isGlobal, classId } = req.body;
+    const announcement = new Announcement({
+        title, content, author: req.user.userId, isGlobal: isGlobal || false, class: classId || null
+    });
+    await announcement.save();
+    res.json(announcement);
+});
+
+app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    await Announcement.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Deleted' });
+});
+
+// Assignments
+app.get('/api/assignments', authenticateToken, async (req, res) => {
+    try {
+        let assignments;
+        if (req.user.role === 'student') {
+            const studentClasses = await Class.find({ students: req.user.userId });
+            const classIds = studentClasses.map(c => c._id);
+            assignments = classIds.length === 0 ? [] : await Assignment.find({ class: { $in: classIds } }).populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
+        } else {
+            assignments = await Assignment.find().populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
+        }
+        res.json(assignments);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/assignments', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const { title, description, classId, dueDate } = req.body;
+    const assignment = new Assignment({
+        title, description, class: classId, teacher: req.user.userId, dueDate, submissions: []
+    });
+    await assignment.save();
+    res.json(assignment);
+});
+
+app.post('/api/assignments/submit', authenticateToken, upload.single('file'), async (req, res) => {
+    try {
+        const { assignmentId, submission } = req.body;
+        const assignment = await Assignment.findById(assignmentId);
+        if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
+
+        let fileUrl = null;
+        if (req.file) {
+            fileUrl = `/uploads/${req.file.filename}`;
+        }
+
+        const existingSubIndex = assignment.submissions.findIndex(s => s.student.toString() === req.user.userId);
+        
+        const newSubmission = {
+            student: req.user.userId,
+            submission: submission || '',
+            fileUrl: fileUrl, 
+            submittedAt: new Date()
+        };
+
+        if (existingSubIndex > -1) {
+            if (!fileUrl && assignment.submissions[existingSubIndex].fileUrl) {
+                newSubmission.fileUrl = assignment.submissions[existingSubIndex].fileUrl;
+            }
+            assignment.submissions[existingSubIndex] = { ...assignment.submissions[existingSubIndex], ...newSubmission };
+        } else {
+            assignment.submissions.push(newSubmission);
+        }
+
+        await assignment.save();
+        res.json({ message: 'Submitted successfully' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error submitting assignment' });
+    }
+});
+
+app.put('/api/assignments/:id', authenticateToken, async (req, res) => {
+    const { title, description, dueDate } = req.body;
+    const assignment = await Assignment.findById(req.params.id);
+    if (!assignment) return res.status(404).json({ error: 'Not found' });
+    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) return res.status(403).json({ error: 'Denied' });
+    
+    const updated = await Assignment.findByIdAndUpdate(req.params.id, { title, description, dueDate }, { new: true });
+    res.json(updated);
+});
+
+app.delete('/api/assignments/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    await Assignment.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Deleted' });
+});
+
+app.get('/api/assignments/:id/submissions', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const assignment = await Assignment.findById(req.params.id).populate('submissions.student', 'name email');
+    res.json(assignment.submissions);
+});
+
+app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const { assignmentId, studentId, grade } = req.body;
+    const assignment = await Assignment.findById(assignmentId);
+    const sub = assignment.submissions.find(s => s.student.toString() === studentId);
+    if (sub) {
+        sub.grade = grade;
+        await assignment.save();
+        res.json({ message: 'Graded' });
+    } else {
+        res.status(404).json({ error: 'Submission not found' });
+    }
+});
+
+// Events
+app.get('/api/events', async (req, res) => {
+    const events = await Event.find().populate('author', 'name').sort({ date: 1 });
+    res.json(events);
+});
+
+app.post('/api/events', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    const { title, description, date } = req.body;
+    const event = new Event({ title, description, date, author: req.user.userId });
+    await event.save();
+    res.json(event);
+});
+
+app.delete('/api/events/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
+    await Event.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Deleted' });
+});
+
+// Media
+app.get('/api/media', async (req, res) => {
+    const media = await Media.find().populate('author', 'name').sort({ createdAt: -1 });
+    res.json(media);
+});
+
+app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
+    try {
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
+        }
+
+        const { title, type, date } = req.body;
+        const fileUrl = `/uploads/${req.file.filename}`;
+        const mediaDate = date || new Date(); 
+
+        const media = new Media({ 
+            title: title || 'ללא כותרת', 
+            type: type || 'file', 
+            url: fileUrl, 
+            date: mediaDate, 
+            author: req.user.userId 
+        });
+        
+        await media.save();
+        res.json(media);
+    } catch (error) {
+        res.status(500).json({ error: 'Error uploading media: ' + error.message });
+    }
+});
+
+app.delete('/api/media/:id', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+    await Media.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Deleted' });
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
+});
+
+app.use((error, req, res, next) => {
+  console.error('🔥 Unhandled error:', error);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
