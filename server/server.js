@@ -299,6 +299,36 @@ app.get('/api/classes', authenticateToken, async (req, res) => {
     res.json(classes);
 });
 
+// ⭐️ תיקון 2: הוספת הנתיב החסר /api/classes/my
+app.get('/api/classes/my', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        let classes;
+
+        if (req.user.role === 'student') {
+            // תלמיד מקבל רק את הכיתות שבהן הוא רשום
+            classes = await Class.find({ students: userId })
+                .populate('teacher', 'name email')
+                .populate('teachers', 'name email')
+                .populate('students', 'name email');
+        } else if (req.user.role === 'teacher' || req.user.role === 'admin') {
+            // מורה/אדמין מקבל את כל הכיתות שהוא מלמד או מנהל
+            classes = await Class.find({ $or: [{ teacher: userId }, { teachers: userId }] })
+                .populate('teacher', 'name email')
+                .populate('teachers', 'name email')
+                .populate('students', 'name email');
+        } else {
+            classes = [];
+        }
+
+        res.json(classes);
+    } catch (error) {
+        console.error('Error fetching user classes:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+// -------------------------------------------------------------
+
 app.post('/api/classes', authenticateToken, async (req, res) => {
     if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
     const { name, teachers } = req.body;
@@ -570,15 +600,13 @@ app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
-// -------------------------------------------------------------
-// ⭐️ התיקון: טיפול בבקשות API שלא נמצאו (404)
+// ⭐️ תיקון 1: טיפול בבקשות API שלא נמצאו (404)
 // הבלוק הזה תופס כל נתיב שמתחיל ב-/api/ אבל לא תאם לאף נתב שהוגדר קודם,
 // ומחזיר תשובת JSON 404 תקינה.
 app.use('/api', (req, res) => {
   console.warn(`❌ 404 API Endpoint Not Found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ error: `API endpoint not found: ${req.originalUrl}` });
 });
-// -------------------------------------------------------------
 
 // נתב ברירת המחדל - מחזיר את קובץ ה-HTML הראשי עבור כל נתיב אחר (SPA fallback)
 app.get('*', (req, res) => {
