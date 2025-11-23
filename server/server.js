@@ -6,8 +6,8 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer'; // ✅ ADDED: לטיפול בהעלאת קבצים
-import fs from 'fs'; // ✅ ADDED: לניהול תיקיות
+import multer from 'multer';
+import fs from 'fs';
 
 // Fix for __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -23,9 +23,8 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 app.use(cors());
 app.use(express.json());
 
-// ✅ הגדרת העלאת קבצים (Multer) - אחסון מקומי
+// הגדרת העלאת קבצים (Multer) - אחסון מקומי
 const uploadDir = path.join(__dirname, 'uploads');
-// יצירת התיקייה אם היא לא קיימת
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -46,11 +45,10 @@ const upload = multer({
     limits: { fileSize: 50 * 1024 * 1024 } // הגבלה ל-50MB
 });
 
-// ✅ חשיפת הקבצים הסטטיים
+// חשיפת הקבצים הסטטיים
 app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
 app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
-// ✅ חשיפת תיקיית ההעלאות
 app.use('/uploads', express.static(uploadDir));
 
 
@@ -111,7 +109,6 @@ const eventSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-// ✅ FIXED: Media Schema - date is no longer required, uses default
 const mediaSchema = new mongoose.Schema({
   title: { type: String, required: true },
   type: { type: String, enum: ['image', 'video'], required: true },
@@ -211,38 +208,30 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// ✅ FIXED: Login Route - Added detailed error logging to find 500 issue
 app.post('/api/login', async (req, res) => {
   try {
-    console.log('🔐 Login Attempt:', req.body.email); 
-    
     const { email, password } = req.body;
     
     if (!email || !password) {
-        console.log('❌ Missing email or password');
         return res.status(400).json({ error: 'Email and password are required' });
     }
 
     const user = await User.findOne({ email });
     if (!user) {
-        console.log('❌ User not found in DB:', email);
         return res.status(400).json({ error: 'Invalid email or password' });
     }
 
     if (!user.password) {
-        console.error('❌ Error: User found but has no password field');
         return res.status(500).json({ error: 'User data corrupted' });
     }
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-        console.log('❌ Password mismatch for:', email);
         return res.status(400).json({ error: 'Invalid email or password' });
     }
 
     const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
     
-    console.log('✅ Login successful:', email);
     res.json({ 
         message: 'Login successful', 
         token, 
@@ -365,10 +354,52 @@ app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) =>
     res.json(announcements);
 });
 
-// Announcements
+// ✅ ANNOUNCEMENTS - UPDATED LOGIC
 app.get('/api/announcements', async (req, res) => {
-    const announcements = await Announcement.find({ isGlobal: true }).populate('author class').sort({ createdAt: -1 });
-    res.json(announcements);
+    try {
+        // בדיקה ידנית של הטוקן (כי זה נתיב חצי-ציבורי)
+        const authHeader = req.headers['authorization'];
+        const token = authHeader && authHeader.split(' ')[1];
+        
+        let query = { isGlobal: true }; // ברירת מחדל: רק הודעות כלליות
+
+        if (token) {
+            try {
+                const decoded = jwt.verify(token, JWT_SECRET);
+                const userId = decoded.userId;
+
+                // מציאת הכיתות שהמשתמש שייך אליהן
+                const userClasses = await Class.find({
+                    $or: [
+                        { students: userId },
+                        { teachers: userId },
+                        { teacher: userId }
+                    ]
+                }).select('_id');
+                
+                const classIds = userClasses.map(c => c._id);
+
+                // הודעות כלליות או הודעות לכיתות שלי
+                query = {
+                    $or: [
+                        { isGlobal: true },
+                        { class: { $in: classIds } }
+                    ]
+                };
+            } catch (e) {
+                console.log('Error verifying token for announcements:', e.message);
+            }
+        }
+
+        const announcements = await Announcement.find(query)
+            .populate('author', 'name')
+            .populate('class', 'name')
+            .sort({ createdAt: -1 });
+
+        res.json(announcements);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 app.post('/api/announcements', authenticateToken, async (req, res) => {
@@ -387,12 +418,11 @@ app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Deleted' });
 });
 
-// ✅ FIXED: Assignments - Student View Logic
+// Assignments
 app.get('/api/assignments', authenticateToken, async (req, res) => {
     try {
         let assignments;
         if (req.user.role === 'student') {
-            // FIX: חיפוש כיתות שהתלמיד רשום בהן ב-Class collection
             const studentClasses = await Class.find({ students: req.user.userId });
             const classIds = studentClasses.map(c => c._id);
             
@@ -405,7 +435,6 @@ app.get('/api/assignments', authenticateToken, async (req, res) => {
                     .sort({ dueDate: 1 });
             }
         } else {
-            // מורים ומנהלים רואים הכל
             assignments = await Assignment.find()
                 .populate('class', 'name')
                 .populate('teacher', 'name')
@@ -427,7 +456,6 @@ app.post('/api/assignments', authenticateToken, async (req, res) => {
     res.json(assignment);
 });
 
-// ✅ FIXED: Assignment Submission with File Upload
 app.post('/api/assignments/submit', authenticateToken, upload.single('file'), async (req, res) => {
     try {
         const { assignmentId, submission } = req.body;
@@ -450,7 +478,6 @@ app.post('/api/assignments/submit', authenticateToken, upload.single('file'), as
         };
 
         if (existingSubIndex > -1) {
-            // עדכון הגשה קיימת
             if (!fileUrl && assignment.submissions[existingSubIndex].fileUrl) {
                 newSubmission.fileUrl = assignment.submissions[existingSubIndex].fileUrl;
             }
@@ -529,7 +556,6 @@ app.get('/api/media', async (req, res) => {
     res.json(media);
 });
 
-// ✅ FIXED: Media POST Route - Handles Multer and Date
 app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
     try {
         if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
@@ -562,7 +588,6 @@ app.post('/api/media', authenticateToken, upload.single('file'), async (req, res
 
 app.delete('/api/media/:id', authenticateToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    // אופציונלי: מחיקת הקובץ הפיזי מהשרת כאן
     await Media.findByIdAndDelete(req.params.id);
     res.json({ message: 'Deleted' });
 });
