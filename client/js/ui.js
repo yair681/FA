@@ -511,8 +511,21 @@ class UIManager {
             return;
         }
 
-        container.innerHTML = events.map(event => `
+        container.innerHTML = events.map(event => {
+            // בדיקה אם למשתמש יש הרשאה למחוק (מורה או מנהל)
+            const canDelete = authManager.isAdmin() || 
+                             (authManager.isTeacher() && event.author?._id === authManager.currentUser?.id) ||
+                             authManager.isTeacher(); 
+
+            return `
             <div class="announcement">
+                ${canDelete ? `
+                    <div class="announcement-actions">
+                        <button class="btn btn-danger btn-sm" onclick="uiManager.deleteEvent('${event._id}')">
+                            <i class="fas fa-trash"></i> מחיקה
+                        </button>
+                    </div>
+                ` : ''}
                 <div class="announcement-header">
                     <div class="announcement-title">${event.title}</div>
                     <div class="announcement-date">${this.formatDate(event.date)}</div>
@@ -522,7 +535,7 @@ class UIManager {
                     <span style="color: var(--gray); font-size: 0.9rem;">${event.author?.name || 'מערכת'}</span>
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
 
     renderMedia(media, containerId) {
@@ -1190,6 +1203,18 @@ class UIManager {
                 this.showSuccess('המשימה נמחקה בהצלחה');
             } catch (error) {
                 this.showError('שגיאה במחיקת המשימה: ' + error.message);
+            }
+        }
+    }
+
+    async deleteEvent(eventId) {
+        if (confirm('האם אתה בטוח שברצונך למחוק אירוע זה?')) {
+            try {
+                await dbManager.deleteEvent(eventId);
+                this.loadPageData('events');
+                this.showSuccess('האירוע נמחק בהצלחה');
+            } catch (error) {
+                this.showError('שגיאה במחיקת האירוע: ' + error.message);
             }
         }
     }
