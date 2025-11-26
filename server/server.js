@@ -158,6 +158,7 @@ mongoose.connect(MONGODB_URI)
   })
   .catch(err => {
     console.error('❌ MongoDB connection error:', err);
+    console.error('⚠️ Server will continue running but database operations will fail');
   });
 
 const authenticateToken = async (req, res, next) => {
@@ -294,37 +295,62 @@ app.delete('/api/users/:id', authenticateToken, async (req, res) => {
 
 // Classes
 app.get('/api/classes', authenticateToken, async (req, res) => {
-    // ✅ מורים ותלמידים רואים רק את הכיתות שלהם
-    let query = {};
-    
-    if (req.user.role === 'student') {
-        // תלמידים רואים רק כיתות שהם חברים בהן
-        query = { students: req.user.userId };
-    } else if (req.user.role === 'teacher') {
-        // מורים רואים רק כיתות שהם מלמדים בהן
-        query = { teachers: req.user.userId };
+    try {
+        // ✅ מורים ותלמידים רואים רק את הכיתות שלהם
+        let query = {};
+        
+        if (req.user.role === 'student') {
+            // תלמידים רואים רק כיתות שהם חברים בהן
+            query = { students: req.user.userId };
+        } else if (req.user.role === 'teacher') {
+            // מורים רואים רק כיתות שהם מלמדים בהן
+            query = { teachers: req.user.userId };
+        }
+        // אדמינים רואים את כל הכיתות (query ריק)
+        
+        const classes = await Class.find(query)
+          .populate('teacher', 'name email')
+          .populate('teachers', 'name email')
+          .populate('students', 'name email');
+        res.json(classes);
+    } catch (error) {
+        console.error('❌ Error fetching classes:', error);
+        res.status(500).json({ error: 'Failed to fetch classes', message: error.message });
     }
-    // אדמינים רואים את כל הכיתות (query ריק)
-    
-    const classes = await Class.find(query)
-      .populate('teacher', 'name email')
-      .populate('teachers', 'name email')
-      .populate('students', 'name email');
-    res.json(classes);
 });
 
 app.post('/api/classes', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    const { name, teachers } = req.body;
-    // ✅ ביטול שיוך אוטומטי - כיתה חדשה נוצרת ללא תלמידים
-    const newClass = new Class({
-        name,
-        teacher: req.user.userId,
-        teachers: [req.user.userId, ...(teachers || [])],
-        students: [] // רשימה ריקה, המורים יוכלו להוסיף תלמידים ידנית
-    });
-    await newClass.save();
-    res.json(newClass);
+    try {
+        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+        
+        const { name, teachers } = req.body;
+        
+        if (!name) {
+            return res.status(400).json({ error: 'Class name is required' });
+        }
+        
+        // ✅ ביטול שיוך אוטומטי - כיתה חדשה נוצרת ללא תלמידים
+        const newClass = new Class({
+            name,
+            teacher: req.user.userId,
+            teachers: [req.user.userId, ...(teachers || [])],
+            students: [] // רשימה ריקה, המורים יוכלו להוסיף תלמידים ידנית
+        });
+        
+        await newClass.save();
+        
+        const populatedClass = await Class.findById(newClass._id)
+            .populate('teacher', 'name email')
+            .populate('teachers', 'name email')
+            .populate('students', 'name email');
+        
+        res.json(populatedClass);
+    } catch (error) {
+        console.error('❌ Error creating class:', error);
+        res.status(500).json({ error: 'Failed to create class', message: error.message });
+    }
 });
 
 app.put('/api/classes/:id', authenticateToken, async (req, res) => {
