@@ -1761,23 +1761,42 @@ class UIManager {
         }
 
         try {
+            console.log('🔄 הוספת תלמיד לכיתה:', { classId, studentId });
+            
             const classes = await dbManager.getClasses();
             const currentClass = classes.find(c => c._id === classId);
             
-            const teacherIds = currentClass.teachers.map(t => t._id);
-            const studentIds = currentClass.students.map(s => s._id);
+            if (!currentClass) {
+                throw new Error('כיתה לא נמצאה');
+            }
+            
+            // ✅ תיקון: מוודאים שאנחנו שולחים מערך של IDs
+            const teacherIds = currentClass.teachers.map(t => typeof t === 'string' ? t : t._id);
+            const studentIds = currentClass.students.map(s => typeof s === 'string' ? s : s._id);
+            
+            // בדיקה אם התלמיד כבר בכיתה
+            if (studentIds.includes(studentId)) {
+                this.showError('התלמיד כבר נמצא בכיתה');
+                return;
+            }
+            
             studentIds.push(studentId);
+            
+            console.log('📤 שליחת נתונים:', { teacherIds, studentIds });
 
             const response = await fetch(`/api/classes/${classId}`, {
                 method: 'PUT',
                 headers: authManager.getAuthHeaders(),
                 body: JSON.stringify({
+                    name: currentClass.name,
                     teachers: teacherIds,
                     students: studentIds
                 })
             });
 
             if (response.ok) {
+                const updatedClass = await response.json();
+                console.log('✅ כיתה עודכנה:', updatedClass);
                 this.showSuccess('התלמיד נוסף בהצלחה');
                 document.getElementById('add-student-to-class-modal').style.display = 'none';
                 
@@ -1788,9 +1807,11 @@ class UIManager {
                 this.loadPageData('classes'); 
             } else {
                 const error = await response.json();
-                this.showError('שגיאה בהוספת התלמיד: ' + error.error);
+                console.error('❌ שגיאה בתגובה:', error);
+                this.showError('שגיאה בהוספת התלמיד: ' + (error.error || error.message));
             }
         } catch (error) {
+            console.error('❌ שגיאה:', error);
             this.showError('שגיאה: ' + error.message);
         }
     }
@@ -1801,24 +1822,36 @@ class UIManager {
         if (!confirm('האם להסיר את התלמיד מהכיתה?')) return;
 
         try {
+            console.log('🔄 הסרת תלמיד מכיתה:', { classId, studentId });
+            
             const classes = await dbManager.getClasses();
             const currentClass = classes.find(c => c._id === classId);
             
-            const teacherIds = currentClass.teachers.map(t => t._id);
+            if (!currentClass) {
+                throw new Error('כיתה לא נמצאה');
+            }
+            
+            // ✅ תיקון: מוודאים שאנחנו שולחים מערך של IDs
+            const teacherIds = currentClass.teachers.map(t => typeof t === 'string' ? t : t._id);
             const studentIds = currentClass.students
-                .map(s => s._id)
+                .map(s => typeof s === 'string' ? s : s._id)
                 .filter(id => id !== studentId);
+            
+            console.log('📤 שליחת נתונים:', { teacherIds, studentIds });
 
             const response = await fetch(`/api/classes/${classId}`, {
                 method: 'PUT',
                 headers: authManager.getAuthHeaders(),
                 body: JSON.stringify({
+                    name: currentClass.name,
                     teachers: teacherIds,
                     students: studentIds
                 })
             });
 
             if (response.ok) {
+                const updatedClass = await response.json();
+                console.log('✅ כיתה עודכנה:', updatedClass);
                 this.showSuccess('התלמיד הוסר בהצלחה');
                 document.querySelectorAll('.modal').forEach(m => {
                     if (!m.id) m.remove();
@@ -1826,9 +1859,12 @@ class UIManager {
                 this.manageClass(classId);
                 this.loadPageData('classes');
             } else {
-                this.showError('שגיאה בהסרת התלמיד');
+                const error = await response.json();
+                console.error('❌ שגיאה בתגובה:', error);
+                this.showError('שגיאה בהסרת התלמיד: ' + (error.error || error.message));
             }
         } catch (error) {
+            console.error('❌ שגיאה:', error);
             this.showError('שגיאה: ' + error.message);
         }
     }
