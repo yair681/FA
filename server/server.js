@@ -1,4 +1,6 @@
 import express from 'express';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
@@ -16,8 +18,107 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new SocketIOServer(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] }
+});
 const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
+
+// --- Zoom / WebRTC Room Management ---
+const zoomRooms = new Map(); // roomId => { name, hostId, users: Map(socketId => { name, userId }) }
+
+io.on('connection', (socket) => {
+
+  socket.on('zoom:create-room', ({ roomId, roomName, userName, userId }) => {
+    zoomRooms.set(roomId, {
+      name: roomName,
+      hostId: socket.id,
+      users: new Map([[socket.id, { name: userName, userId }]])
+    });
+    socket.join(roomId);
+    socket.emit('zoom:room-created', { roomId, roomName });
+  });
+
+  socket.on('zoom:join-room', ({ roomId, userName, userId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room) {
+      socket.emit('zoom:error', { message: 'החדר לא נמצא' });
+      return;
+    }
+    room.users.set(socket.id, { name: userName, userId });
+    socket.join(roomId);
+
+    // שלח למצטרף את רשימת כל המשתתפים הקיימים
+    const existingUsers = [];
+    room.users.forEach((user, sid) => {
+      if (sid !== socket.id) existingUsers.push({ socketId: sid, name: user.name });
+    });
+    socket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers });
+
+    // הודע לכולם במחדר שהצטרף משתמש חדש
+    socket.to(roomId).emit('zoom:user-joined', {
+      socketId: socket.id,
+      name: userName
+    });
+  });
+
+  socket.on('zoom:get-rooms', () => {
+    const rooms = [];
+    zoomRooms.forEach((room, roomId) => {
+      rooms.push({ roomId, name: room.name, participants: room.users.size });
+    });
+    socket.emit('zoom:rooms-list', rooms);
+  });
+
+  // WebRTC Signaling
+  socket.on('zoom:offer', ({ targetSocketId, offer, fromName }) => {
+    io.to(targetSocketId).emit('zoom:offer', {
+      fromSocketId: socket.id,
+      fromName,
+      offer
+    });
+  });
+
+  socket.on('zoom:answer', ({ targetSocketId, answer }) => {
+    io.to(targetSocketId).emit('zoom:answer', {
+      fromSocketId: socket.id,
+      answer
+    });
+  });
+
+  socket.on('zoom:ice-candidate', ({ targetSocketId, candidate }) => {
+    io.to(targetSocketId).emit('zoom:ice-candidate', {
+      fromSocketId: socket.id,
+      candidate
+    });
+  });
+
+  socket.on('zoom:leave-room', ({ roomId }) => {
+    handleLeaveRoom(socket, roomId);
+  });
+
+  socket.on('disconnect', () => {
+    zoomRooms.forEach((room, roomId) => {
+      if (room.users.has(socket.id)) {
+        handleLeaveRoom(socket, roomId);
+      }
+    });
+  });
+});
+
+function handleLeaveRoom(socket, roomId) {
+  const room = zoomRooms.get(roomId);
+  if (!room) return;
+  const user = room.users.get(socket.id);
+  room.users.delete(socket.id);
+  socket.leave(roomId);
+  socket.to(roomId).emit('zoom:user-left', { socketId: socket.id });
+  if (room.users.size === 0) {
+    zoomRooms.delete(roomId);
+  }
+}
+// --- End Zoom ---
 
 // Middleware
 app.use(cors());
@@ -620,6 +721,6 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

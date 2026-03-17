@@ -7,6 +7,7 @@ function updateUI() {
     const settingsLink = document.getElementById('settings-link');
     const adminLink = document.getElementById('admin-link');
     const assignmentsLink = document.getElementById('assignments-link');
+    const zoomLink = document.getElementById('zoom-link');
 
     console.log('🔄 Updating UI for user:', user ? user.name : 'Guest');
 
@@ -16,6 +17,12 @@ function updateUI() {
         logoutBtn.style.display = 'inline-block';
         settingsLink.style.display = 'block';
         assignmentsLink.style.display = 'block'; // Show assignments link for logged-in users
+        if (zoomLink) zoomLink.style.display = 'block';
+
+        // אתחול זום אם עדיין לא אותחל
+        if (window.zoomManager && !zoomManager.socket) {
+            zoomManager.init(user.name, user.id);
+        }
 
         // Show admin link for admin users
         if (user.role === 'admin') {
@@ -70,6 +77,7 @@ function updateUI() {
         settingsLink.style.display = 'none';
         adminLink.style.display = 'none';
         assignmentsLink.style.display = 'none'; // Hide assignments link for guests
+        if (zoomLink) zoomLink.style.display = 'none';
 
         // Hide all teacher/admin buttons
         const addButtons = document.querySelectorAll('[id*="add-"]');

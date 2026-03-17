@@ -23,6 +23,7 @@
                     <li><a href="#" class="nav-link" data-page="assignments" id="assignments-link">משימות</a></li>
                     <li><a href="#" class="nav-link" data-page="events">אירועים</a></li>
                     <li><a href="#" class="nav-link" data-page="history">מה היה לנו עד כה</a></li>
+                    <li><a href="#" class="nav-link" data-page="zoom" id="zoom-link" style="display:none;">שיחות וידאו</a></li>
                     <li><a href="#" class="nav-link" data-page="settings" id="settings-link" style="display:none;">הגדרות</a></li>
                     <li><a href="#" class="nav-link" data-page="admin" id="admin-link" style="display:none;">ניהול</a></li>
                 </ul>
@@ -166,6 +167,72 @@
                 </div>
             </div>
             
+            <!-- ===== עמוד זום ===== -->
+            <div id="zoom-page" class="page" style="display:none;">
+                <h2 class="page-title">שיחות וידאו</h2>
+
+                <!-- לובי -->
+                <div id="zoom-lobby">
+                    <div class="zoom-lobby-grid">
+                        <!-- יצירת חדר -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">פתיחת חדר חדש</h2>
+                            </div>
+                            <div style="padding: 1rem;">
+                                <div class="form-group">
+                                    <label for="zoom-room-name-input">שם החדר</label>
+                                    <input type="text" id="zoom-room-name-input" placeholder="לדוגמה: שיעור מתמטיקה ז1">
+                                </div>
+                                <button class="btn" onclick="zoomManager.createRoom()">
+                                    <i class="fas fa-video"></i> פתח חדר
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- חדרים פעילים -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 class="card-title">חדרים פעילים</h2>
+                                <button class="btn btn-secondary" onclick="zoomManager.loadRoomsList()">
+                                    <i class="fas fa-sync-alt"></i> רענן
+                                </button>
+                            </div>
+                            <div id="zoom-rooms-list" style="padding: 1rem;">
+                                <p class="zoom-no-rooms">אין חדרי שיחה פעילים כרגע</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- חדר שיחה פעיל -->
+                <div id="zoom-call-container" style="display:none; flex-direction:column;">
+                    <div class="zoom-call-header">
+                        <div class="zoom-call-header-info">
+                            <i class="fas fa-video"></i>
+                            <span id="zoom-call-title">שיחה</span>
+                            <span id="zoom-participant-count" class="zoom-count-badge">0 משתתפים</span>
+                        </div>
+                        <div class="zoom-controls">
+                            <button id="zoom-toggle-audio" class="zoom-control-btn" title="השתק/הפעל מיקרופון" onclick="zoomManager.toggleAudio()">
+                                <i class="fas fa-microphone"></i>
+                            </button>
+                            <button id="zoom-toggle-video" class="zoom-control-btn" title="הפעל/כבה מצלמה" onclick="zoomManager.toggleVideo()">
+                                <i class="fas fa-video"></i>
+                            </button>
+                            <button id="zoom-screen-share" class="zoom-control-btn" title="שתף מסך" onclick="zoomManager.toggleScreenShare()">
+                                <i class="fas fa-desktop"></i>
+                            </button>
+                            <button class="zoom-control-btn zoom-leave-btn" title="עזוב שיחה" onclick="zoomManager.leaveRoom()">
+                                <i class="fas fa-phone-slash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="zoom-video-grid" class="zoom-video-grid"></div>
+                </div>
+            </div>
+            <!-- ===== סוף עמוד זום ===== -->
+
             <div id="settings-page" class="page" style="display:none;">
                 <h2 class="page-title">הגדרות</h2>
                 
@@ -619,9 +686,11 @@
         </div>
     </div>
 
+    <script src="/socket.io/socket.io.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/database.js"></script>
     <script src="/js/ui.js"></script>
     <script src="/js/app.js"></script>
+    <script src="/js/zoom.js"></script>
 </body>
 </html>

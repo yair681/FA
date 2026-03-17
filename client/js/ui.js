@@ -199,7 +199,11 @@ class UIManager {
 
     showPage(pageId) {
         document.querySelectorAll('.page').forEach(page => {
-            page.style.display = page.id === `${pageId}-page` ? 'block' : 'none';
+            if (page.id === `${pageId}-page`) {
+                page.style.display = pageId === 'zoom' ? 'block' : 'block';
+            } else {
+                page.style.display = 'none';
+            }
         });
         
         this.currentPage = pageId;
@@ -233,6 +237,9 @@ class UIManager {
                     break;
                 case 'admin':
                     await this.loadAdminPage();
+                    break;
+                case 'zoom':
+                    if (window.zoomManager) zoomManager.loadRoomsList();
                     break;
             }
         } catch (error) {
