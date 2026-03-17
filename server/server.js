@@ -58,7 +58,7 @@ function admitUser(targetSocket, room, roomId, userName, userId) {
   room.users.forEach((u, sid) => {
     if (sid !== targetSocket.id) existingUsers.push({ socketId: sid, name: u.name, isCoHost: u.isCoHost, isHost: sid === room.hostSocketId });
   });
-  targetSocket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers, isHost: false, chatMode: room.chatMode || 'everyone' });
+  targetSocket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers, isHost: false, chatMode: room.chatMode || 'everyone', permissions: room.permissions || { allowMic: true, allowCamera: true, allowScreenShare: true } });
   targetSocket.to(roomId).emit('zoom:user-joined', { socketId: targetSocket.id, name: userName });
   io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
   broadcastRooms();
@@ -102,17 +102,18 @@ io.on('connection', (socket) => {
       waitingRoom: new Map(),
       whitelist: new Set(),
       screenShareSocketId: null,
-      chatMode: 'everyone'
+      chatMode: 'everyone',
+      permissions: { allowMic: true, allowCamera: true, allowScreenShare: true }
     });
     socket.join(roomId);
-    socket.emit('zoom:room-created', { roomId, roomName });
+    socket.emit('zoom:room-created', { roomId, roomName, permissions: { allowMic: true, allowCamera: true, allowScreenShare: true } });
     broadcastRooms();
   });
 
   socket.on('zoom:request-join', ({ roomId, userName, userId }) => {
     const room = zoomRooms.get(roomId);
     if (!room) { socket.emit('zoom:error', { message: 'החדר לא נמצא' }); return; }
-    if (room.whitelist.has(userId)) {
+    if (room.whitelist.has(String(userId))) {
       admitUser(socket, room, roomId, userName, userId); return;
     }
     room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId });
@@ -168,8 +169,15 @@ io.on('connection', (socket) => {
   socket.on('zoom:update-whitelist', ({ roomId, userIds }) => {
     const room = zoomRooms.get(roomId);
     if (!room || !isHostOrCoHost(socket.id, room)) return;
-    room.whitelist = new Set(userIds);
+    room.whitelist = new Set(userIds.map(id => String(id)));
     socket.emit('zoom:whitelist-updated');
+  });
+
+  socket.on('zoom:update-room-permissions', ({ roomId, permissions }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.permissions = { ...room.permissions, ...permissions };
+    io.to(roomId).emit('zoom:permissions-changed', { permissions: room.permissions });
   });
 
   socket.on('zoom:chat-message', ({ roomId, text }) => {

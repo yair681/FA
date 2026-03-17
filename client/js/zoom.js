@@ -19,6 +19,7 @@ class ZoomManager {
         this.unreadChat = 0;
         this.chatMode = 'everyone';
         this.whitelistItems = [];
+        this.roomPermissions = { allowMic: true, allowCamera: true, allowScreenShare: true };
 
         this.iceServers = {
             iceServers: [
@@ -77,6 +78,7 @@ class ZoomManager {
         this.socket.on('zoom:chat-message',         d => this.appendChatMessage(d));
         this.socket.on('zoom:chat-mode-changed',    d => this.onChatModeChanged(d));
         this.socket.on('zoom:muted-by-host',        () => this.onMutedByHost());
+        this.socket.on('zoom:permissions-changed',  d => this.onPermissionsChanged(d));
     }
 
     // ── Status / Permission ───────────────────────────────────────────────────
@@ -146,24 +148,28 @@ class ZoomManager {
     }
 
     // ── Room Events ───────────────────────────────────────────────────────────
-    async onRoomCreated({ roomId, roomName }) {
+    async onRoomCreated({ roomId, roomName, permissions }) {
         this.currentRoomId = roomId;
         this.isHost = true;
         this.chatMode = 'everyone';
+        this.roomPermissions = permissions || { allowMic: true, allowCamera: true, allowScreenShare: true };
         this.showCallUI(roomName);
         this.addLocalTile();
         this.updateHostControls();
+        this.updatePermissionUI();
     }
 
-    async onRoomJoined({ roomId, roomName, existingUsers, isHost, chatMode }) {
+    async onRoomJoined({ roomId, roomName, existingUsers, isHost, chatMode, permissions }) {
         this.currentRoomId = roomId;
         this.isHost = isHost;
         this.chatMode = chatMode || 'everyone';
+        this.roomPermissions = permissions || { allowMic: true, allowCamera: true, allowScreenShare: true };
         this.hideWaitingScreen();
         this.showCallUI(roomName);
         this.addLocalTile();
         this.updateHostControls();
         this.updateChatUI();
+        this.enforcePermissions();
         for (const u of existingUsers) {
             this.addRemoteTilePlaceholder(u.socketId, u.name);
             await this.createOffer(u.socketId, u.name);
@@ -365,6 +371,7 @@ class ZoomManager {
     }
 
     _showToast(msg) {
+        if (!msg) return;
         let toast = document.getElementById('zoom-toast');
         if (!toast) {
             toast = document.createElement('div');
@@ -376,6 +383,68 @@ class ZoomManager {
         toast.style.opacity = '1';
         clearTimeout(toast._hideTimer);
         toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+    }
+
+    // ── Room Permissions ──────────────────────────────────────────────────────
+    onPermissionsChanged({ permissions }) {
+        this.roomPermissions = permissions;
+        this.updatePermissionUI();
+        this.enforcePermissions();
+    }
+
+    updateRoomPermission(key, value) {
+        if (!this.socket || (!this.isHost && !this.isCoHost)) return;
+        const updated = { ...this.roomPermissions, [key]: value };
+        this.socket.emit('zoom:update-room-permissions', { roomId: this.currentRoomId, permissions: updated });
+    }
+
+    enforcePermissions() {
+        const isManager = this.isHost || this.isCoHost;
+        const p = this.roomPermissions;
+
+        // כפתורי מיקרופון/מצלמה/מסך — השבת לאנשים שאינם מנהלים
+        const audioBtn  = document.getElementById('zoom-audio-btn');
+        const videoBtn  = document.getElementById('zoom-video-btn');
+        const screenBtn = document.getElementById('zoom-screen-btn');
+
+        if (audioBtn)  { audioBtn.disabled  = !isManager && !p.allowMic;          audioBtn.title  = !isManager && !p.allowMic  ? 'המארח השבית מיקרופון' : 'מיקרופון'; }
+        if (videoBtn)  { videoBtn.disabled  = !isManager && !p.allowCamera;        videoBtn.title  = !isManager && !p.allowCamera ? 'המארח השבית מצלמה' : 'מצלמה'; }
+        if (screenBtn) { screenBtn.disabled = !isManager && !p.allowScreenShare;   screenBtn.title = !isManager && !p.allowScreenShare ? 'המארח השבית שיתוף מסך' : 'שתף מסך'; }
+
+        if (!isManager) {
+            if (!p.allowMic && this.isAudioOn) {
+                this.localStream?.getAudioTracks().forEach(t => t.enabled = false);
+                this.isAudioOn = false;
+                if (audioBtn) { audioBtn.innerHTML = '<i class="fas fa-microphone-slash"></i>'; audioBtn.classList.add('off'); }
+            }
+            if (!p.allowCamera && this.isVideoOn) {
+                this.localStream?.getVideoTracks().forEach(t => t.enabled = false);
+                this.isVideoOn = false;
+                if (videoBtn) { videoBtn.innerHTML = '<i class="fas fa-video-slash"></i>'; videoBtn.classList.add('off'); }
+            }
+            if (!p.allowScreenShare && this.isScreenSharing) {
+                this.stopScreenShare();
+            }
+        }
+        this._showToast(this._buildPermissionToast(p, isManager));
+    }
+
+    _buildPermissionToast(p, isManager) {
+        if (isManager) return null;
+        const blocked = [];
+        if (!p.allowMic)         blocked.push('מיקרופון');
+        if (!p.allowCamera)      blocked.push('מצלמה');
+        if (!p.allowScreenShare) blocked.push('שיתוף מסך');
+        return blocked.length ? 'המארח חסם: ' + blocked.join(', ') : null;
+    }
+
+    updatePermissionUI() {
+        const micCb    = document.getElementById('zoom-perm-mic');
+        const camCb    = document.getElementById('zoom-perm-camera');
+        const screenCb = document.getElementById('zoom-perm-screen');
+        if (micCb)    micCb.checked    = this.roomPermissions.allowMic;
+        if (camCb)    camCb.checked    = this.roomPermissions.allowCamera;
+        if (screenCb) screenCb.checked = this.roomPermissions.allowScreenShare;
     }
 
     // ── Whitelist autocomplete ────────────────────────────────────────────────
@@ -438,22 +507,36 @@ class ZoomManager {
     submitWhitelist() {
         const userIds = new Set();
         this.whitelistItems.forEach(item => {
-            if (item.type === 'user') userIds.add(item.id);
-            else if (item.type === 'class' && item.members) item.members.forEach(id => userIds.add(id));
+            if (item.type === 'user') userIds.add(String(item.id));
+            else if (item.type === 'class' && item.members) item.members.forEach(id => userIds.add(String(id)));
         });
         this.socket.emit('zoom:update-whitelist', { roomId: this.currentRoomId, userIds: Array.from(userIds) });
+        this._showToast('הרשימה נשמרה — ' + userIds.size + ' משתמשים');
     }
 
     // ── Screen Share ──────────────────────────────────────────────────────────
     async toggleScreenShare() {
         if (this.isScreenSharing) { this.stopScreenShare(); return; }
+        if (!this.isHost && !this.isCoHost && !this.roomPermissions.allowScreenShare) {
+            alert('המארח חסם את שיתוף המסך עבור משתתפים'); return;
+        }
         try {
-            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-            const track = this.screenStream.getVideoTracks()[0];
+            const includeAudio = document.getElementById('zoom-screen-audio')?.checked ?? false;
+            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: includeAudio });
+            const videoTrack = this.screenStream.getVideoTracks()[0];
+            const audioTrack = this.screenStream.getAudioTracks()[0] || null;
+
             this.peers.forEach(pc => {
-                const s = pc.getSenders().find(s => s.track?.kind === 'video');
-                if (s) s.replaceTrack(track);
+                // החלף טראק וידאו
+                const vs = pc.getSenders().find(s => s.track?.kind === 'video');
+                if (vs && videoTrack) vs.replaceTrack(videoTrack);
+                // החלף טראק אודיו אם הוגדר שיתוף אודיו
+                if (audioTrack) {
+                    const as = pc.getSenders().find(s => s.track?.kind === 'audio');
+                    if (as) as.replaceTrack(audioTrack);
+                }
             });
+
             const lv = document.getElementById('local-video');
             if (lv) lv.srcObject = this.screenStream;
             this.isScreenSharing = true;
@@ -461,17 +544,26 @@ class ZoomManager {
             const btn = document.getElementById('zoom-screen-btn');
             if (btn) { btn.classList.add('active'); btn.title = 'עצור שיתוף'; }
             this.setDominantTile('tile-local', true);
-            track.onended = () => this.stopScreenShare();
+            videoTrack.onended = () => this.stopScreenShare();
         } catch(e) { if (e.name !== 'NotAllowedError') alert('שגיאה בשיתוף מסך: ' + e.message); }
     }
 
     stopScreenShare() {
         if (!this.isScreenSharing) return;
         const camTrack = this.localStream?.getVideoTracks()[0];
+        const micTrack = this.localStream?.getAudioTracks()[0];
+        const hadScreenAudio = this.screenStream?.getAudioTracks().length > 0;
+
         this.peers.forEach(pc => {
-            const s = pc.getSenders().find(s => s.track?.kind === 'video');
-            if (s && camTrack) s.replaceTrack(camTrack);
+            const vs = pc.getSenders().find(s => s.track?.kind === 'video');
+            if (vs && camTrack) vs.replaceTrack(camTrack);
+            // שחזר מיקרופון אם החלפנו אותו
+            if (hadScreenAudio && micTrack) {
+                const as = pc.getSenders().find(s => s.track?.kind === 'audio');
+                if (as) as.replaceTrack(micTrack);
+            }
         });
+
         const lv = document.getElementById('local-video');
         if (lv && this.localStream) lv.srcObject = this.localStream;
         this.screenStream?.getTracks().forEach(t => t.stop());
@@ -728,6 +820,14 @@ class ZoomManager {
         this.isAudioOn = true; this.isVideoOn = true; this.isScreenSharing = false;
         this.screenShareSocketId = null;
         this.unreadChat = 0; this.chatMode = 'everyone'; this.whitelistItems = [];
+        this.roomPermissions = { allowMic: true, allowCamera: true, allowScreenShare: true };
+        // שחרר השבתות
+        const audioBtn = document.getElementById('zoom-audio-btn');
+        const videoBtn = document.getElementById('zoom-video-btn');
+        const screenBtn = document.getElementById('zoom-screen-btn');
+        if (audioBtn)  { audioBtn.disabled = false; }
+        if (videoBtn)  { videoBtn.disabled = false; }
+        if (screenBtn) { screenBtn.disabled = false; }
         this.showLobbyUI();
         setTimeout(() => this.loadRoomsList(), 300);
     }

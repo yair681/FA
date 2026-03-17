@@ -1008,4 +1008,33 @@ footer {
     .zoom-video-grid.has-screen-share .video-tile.dominant { flex: 1 1 100%; max-height: 40vh; }
     .zoom-video-grid.has-screen-share .video-tile:not(.dominant) { flex: 1 1 calc(50% - 4px); }
 }
+/* Permissions rows in manage panel */
+.zoom-perm-row { margin-bottom: 0.5rem; }
+.zoom-perm-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.88rem;
+    color: #e0e0e0;
+    padding: 0.25rem 0;
+}
+.zoom-perm-label input[type="checkbox"] { accent-color: var(--primary); width: 16px; height: 16px; cursor: pointer; }
+
+/* Screen audio share checkbox */
+.zoom-audio-share-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: rgba(255,255,255,0.6);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 0 0.3rem;
+    user-select: none;
+}
+.zoom-audio-share-label input[type="checkbox"] { accent-color: var(--warning); cursor: pointer; }
+.zoom-audio-share-label:hover { color: rgba(255,255,255,0.9); }
+
+/* Disabled control buttons */
+.zoom-ctrl-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
 /* ===== End Zoom Styles ===== */

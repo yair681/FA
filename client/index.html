@@ -223,6 +223,10 @@
                             <button id="zoom-audio-btn" class="zoom-ctrl-btn" title="מיקרופון" onclick="zoomManager.toggleAudio()"><i class="fas fa-microphone"></i></button>
                             <button id="zoom-video-btn" class="zoom-ctrl-btn" title="מצלמה" onclick="zoomManager.toggleVideo()"><i class="fas fa-video"></i></button>
                             <button id="zoom-screen-btn" class="zoom-ctrl-btn" title="שתף מסך" onclick="zoomManager.toggleScreenShare()"><i class="fas fa-desktop"></i></button>
+                            <label class="zoom-audio-share-label" title="שתף גם את הצליל">
+                                <input type="checkbox" id="zoom-screen-audio">
+                                <i class="fas fa-volume-up"></i>
+                            </label>
                             <button id="zoom-leave-btn" class="zoom-ctrl-btn leave" title="עזוב" onclick="zoomManager.leaveRoom()"><i class="fas fa-phone-slash"></i></button>
                             <button id="zoom-end-meeting-btn" class="zoom-ctrl-btn end" title="סיים פגישה לכולם" style="display:none;" onclick="zoomManager.endMeeting()"><i class="fas fa-times-circle"></i> סיים</button>
                         </div>
@@ -264,6 +268,28 @@
                                 <div class="zoom-panel-section">
                                     <h4><i class="fas fa-user-clock"></i> ממתינים</h4>
                                     <div id="zoom-waiting-list"><p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p></div>
+                                </div>
+                                <!-- Participant permissions -->
+                                <div class="zoom-panel-section">
+                                    <h4><i class="fas fa-shield-alt"></i> הרשאות משתתפים</h4>
+                                    <div class="zoom-perm-row">
+                                        <label class="zoom-perm-label">
+                                            <input type="checkbox" id="zoom-perm-mic" checked onchange="zoomManager.updateRoomPermission('allowMic', this.checked)">
+                                            <i class="fas fa-microphone"></i> מיקרופון
+                                        </label>
+                                    </div>
+                                    <div class="zoom-perm-row">
+                                        <label class="zoom-perm-label">
+                                            <input type="checkbox" id="zoom-perm-camera" checked onchange="zoomManager.updateRoomPermission('allowCamera', this.checked)">
+                                            <i class="fas fa-video"></i> מצלמה
+                                        </label>
+                                    </div>
+                                    <div class="zoom-perm-row">
+                                        <label class="zoom-perm-label">
+                                            <input type="checkbox" id="zoom-perm-screen" checked onchange="zoomManager.updateRoomPermission('allowScreenShare', this.checked)">
+                                            <i class="fas fa-desktop"></i> שיתוף מסך
+                                        </label>
+                                    </div>
                                 </div>
                                 <!-- Chat mode -->
                                 <div class="zoom-panel-section">
