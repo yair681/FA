@@ -409,4 +409,4 @@ class ZoomManager {
     }
 }
 
-const zoomManager = new ZoomManager();
+window.zoomManager = new ZoomManager();
