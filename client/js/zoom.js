@@ -287,9 +287,9 @@ class ZoomManager {
     }
 
     updateHostControls() {
-        // Show/hide manage tab for host/cohost
-        const tabManage = document.getElementById('tab-manage');
-        if (tabManage) tabManage.style.display = (this.isHost || this.isCoHost) ? '' : 'none';
+        // Show/hide manage button for host/cohost
+        const btnManage = document.getElementById('zoom-btn-manage');
+        if (btnManage) btnManage.style.display = (this.isHost || this.isCoHost) ? '' : 'none';
         // Show/hide whitelist section for host only
         const whitelist = document.getElementById('zoom-whitelist-section');
         if (whitelist) whitelist.style.display = this.isHost ? 'block' : 'none';
@@ -301,16 +301,18 @@ class ZoomManager {
         if (leaveBtn) leaveBtn.style.display = this.isHost ? 'none' : 'inline-flex';
     }
 
-    // ── Tab switching ──────────────────────────────────────────────────────────
-    switchTab(tab) {
-        document.querySelectorAll('.zoom-tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.zoom-tab-content').forEach(t => t.classList.remove('active'));
-        document.getElementById('tab-' + tab)?.classList.add('active');
-        document.getElementById('tab-content-' + tab)?.classList.add('active');
-        if (tab === 'chat') {
-            const badge = document.getElementById('zoom-chat-badge');
-            if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+    // ── Floating panel toggling ────────────────────────────────────────────────
+    togglePanel(panel) {
+        const el = document.getElementById('zoom-panel-' + panel);
+        const btn = document.getElementById('zoom-btn-' + panel);
+        if (!el) return;
+        const isOpen = el.style.display !== 'none';
+        el.style.display = isOpen ? 'none' : 'flex';
+        if (btn) btn.classList.toggle('active', !isOpen);
+        if (!isOpen && panel === 'chat') {
             this.unreadChat = 0;
+            const badge = document.getElementById('zoom-chat-badge');
+            if (badge) badge.style.display = 'none';
         }
     }
 
@@ -333,9 +335,9 @@ class ZoomManager {
         div.innerHTML = `<div class="zoom-chat-msg-from">${isMe ? 'אתה' : from} · ${time}</div><div>${text}</div>`;
         msgs.appendChild(div);
         msgs.scrollTop = msgs.scrollHeight;
-        // Update badge if chat tab not active
-        const chatTab = document.getElementById('tab-content-chat');
-        if (!chatTab?.classList.contains('active')) {
+        // Update badge if chat panel not open
+        const chatPanel = document.getElementById('zoom-panel-chat');
+        if (!chatPanel || chatPanel.style.display === 'none') {
             this.unreadChat++;
             const badge = document.getElementById('zoom-chat-badge');
             if (badge) { badge.textContent = this.unreadChat; badge.style.display = 'inline-flex'; }
@@ -801,8 +803,13 @@ class ZoomManager {
         if (c) c.style.display = 'flex';
         const t = document.getElementById('zoom-call-title');
         if (t) t.textContent = roomName;
-        // Reset tabs to participants
-        this.switchTab('participants');
+        // Close all floating panels on new call
+        ['participants', 'chat', 'manage'].forEach(p => {
+            const el = document.getElementById('zoom-panel-' + p);
+            if (el) el.style.display = 'none';
+            const btn = document.getElementById('zoom-btn-' + p);
+            if (btn) btn.classList.remove('active');
+        });
     }
 
     showLobbyUI() {

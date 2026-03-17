@@ -227,88 +227,97 @@
                                 <input type="checkbox" id="zoom-screen-audio">
                                 <i class="fas fa-volume-up"></i>
                             </label>
+                            <div class="zoom-ctrl-separator"></div>
+                            <button id="zoom-btn-participants" class="zoom-ctrl-btn" title="משתתפים" onclick="zoomManager.togglePanel('participants')"><i class="fas fa-users"></i></button>
+                            <button id="zoom-btn-chat" class="zoom-ctrl-btn" title="צ'אט" onclick="zoomManager.togglePanel('chat')">
+                                <i class="fas fa-comment"></i>
+                                <span id="zoom-chat-badge" class="zoom-ctrl-badge" style="display:none">0</span>
+                            </button>
+                            <button id="zoom-btn-manage" class="zoom-ctrl-btn" title="ניהול פגישה" style="display:none;" onclick="zoomManager.togglePanel('manage')"><i class="fas fa-cog"></i></button>
+                            <div class="zoom-ctrl-separator"></div>
                             <button id="zoom-leave-btn" class="zoom-ctrl-btn leave" title="עזוב" onclick="zoomManager.leaveRoom()"><i class="fas fa-phone-slash"></i></button>
                             <button id="zoom-end-meeting-btn" class="zoom-ctrl-btn end" title="סיים פגישה לכולם" style="display:none;" onclick="zoomManager.endMeeting()"><i class="fas fa-times-circle"></i> סיים</button>
                         </div>
                     </div>
 
-                    <!-- Body: video grid + right sidebar with tabs -->
+                    <!-- Body: video grid full width -->
                     <div class="zoom-call-body">
                         <div id="zoom-video-grid" class="zoom-video-grid"></div>
+                    </div>
 
-                        <!-- Right sidebar with tabs -->
-                        <div class="zoom-sidebar">
-                            <!-- Tabs -->
-                            <div class="zoom-tabs">
-                                <button class="zoom-tab active" onclick="zoomManager.switchTab('participants')" id="tab-participants">משתתפים</button>
-                                <button class="zoom-tab" onclick="zoomManager.switchTab('chat')" id="tab-chat">
-                                    צ'אט <span id="zoom-chat-badge" class="zoom-badge-count" style="display:none">0</span>
-                                </button>
-                                <!-- Management tab only for host/cohost -->
-                                <button class="zoom-tab" onclick="zoomManager.switchTab('manage')" id="tab-manage" style="display:none">ניהול <span id="zoom-waiting-badge" class="zoom-badge-count" style="display:none">0</span></button>
+                    <!-- Floating: Participants panel -->
+                    <div id="zoom-panel-participants" class="zoom-floating-panel" style="display:none;">
+                        <div class="zoom-panel-header">
+                            <span><i class="fas fa-users"></i> משתתפים</span>
+                            <button class="zoom-panel-close" onclick="zoomManager.togglePanel('participants')"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div id="zoom-participants-panel" class="zoom-panel-body"></div>
+                    </div>
+
+                    <!-- Floating: Chat panel -->
+                    <div id="zoom-panel-chat" class="zoom-floating-panel" style="display:none;">
+                        <div class="zoom-panel-header">
+                            <span><i class="fas fa-comment"></i> צ'אט</span>
+                            <button class="zoom-panel-close" onclick="zoomManager.togglePanel('chat')"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div id="zoom-chat-messages" class="zoom-chat-messages zoom-panel-body"></div>
+                        <div class="zoom-chat-input-row">
+                            <input type="text" id="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter') zoomManager.sendChat()">
+                            <button onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- Floating: Manage panel (host/cohost only) -->
+                    <div id="zoom-panel-manage" class="zoom-floating-panel" style="display:none;">
+                        <div class="zoom-panel-header">
+                            <span><i class="fas fa-cog"></i> ניהול פגישה <span id="zoom-waiting-badge" class="zoom-badge-count" style="display:none">0</span></span>
+                            <button class="zoom-panel-close" onclick="zoomManager.togglePanel('manage')"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="zoom-panel-body">
+                            <!-- Waiting room -->
+                            <div class="zoom-panel-section">
+                                <h4><i class="fas fa-user-clock"></i> ממתינים</h4>
+                                <div id="zoom-waiting-list"><p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p></div>
                             </div>
-
-                            <!-- Participants tab (everyone) -->
-                            <div id="tab-content-participants" class="zoom-tab-content active">
-                                <div id="zoom-participants-panel" style="padding:0.5rem;overflow-y:auto;flex:1;"></div>
-                            </div>
-
-                            <!-- Chat tab (everyone) -->
-                            <div id="tab-content-chat" class="zoom-tab-content">
-                                <div id="zoom-chat-messages" class="zoom-chat-messages"></div>
-                                <div class="zoom-chat-input-row">
-                                    <input type="text" id="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter') zoomManager.sendChat()">
-                                    <button onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
+                            <!-- Participant permissions -->
+                            <div class="zoom-panel-section">
+                                <h4><i class="fas fa-shield-alt"></i> הרשאות משתתפים</h4>
+                                <div class="zoom-perm-row">
+                                    <label class="zoom-perm-label">
+                                        <input type="checkbox" id="zoom-perm-mic" checked onchange="zoomManager.updateRoomPermission('allowMic', this.checked)">
+                                        <i class="fas fa-microphone"></i> מיקרופון
+                                    </label>
+                                </div>
+                                <div class="zoom-perm-row">
+                                    <label class="zoom-perm-label">
+                                        <input type="checkbox" id="zoom-perm-camera" checked onchange="zoomManager.updateRoomPermission('allowCamera', this.checked)">
+                                        <i class="fas fa-video"></i> מצלמה
+                                    </label>
+                                </div>
+                                <div class="zoom-perm-row">
+                                    <label class="zoom-perm-label">
+                                        <input type="checkbox" id="zoom-perm-screen" checked onchange="zoomManager.updateRoomPermission('allowScreenShare', this.checked)">
+                                        <i class="fas fa-desktop"></i> שיתוף מסך
+                                    </label>
                                 </div>
                             </div>
-
-                            <!-- Management tab (host/cohost only) -->
-                            <div id="tab-content-manage" class="zoom-tab-content">
-                                <!-- Waiting room -->
-                                <div class="zoom-panel-section">
-                                    <h4><i class="fas fa-user-clock"></i> ממתינים</h4>
-                                    <div id="zoom-waiting-list"><p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p></div>
+                            <!-- Chat mode -->
+                            <div class="zoom-panel-section">
+                                <h4><i class="fas fa-comment"></i> הרשאות צ'אט</h4>
+                                <select id="zoom-chat-mode-select" onchange="zoomManager.setChatMode(this.value)" style="width:100%;background:#1a2a4a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.15);padding:0.4rem;border-radius:6px;">
+                                    <option value="everyone">כולם יכולים לשלוח</option>
+                                    <option value="host-only">מארחים בלבד</option>
+                                </select>
+                            </div>
+                            <!-- Whitelist with autocomplete -->
+                            <div class="zoom-panel-section" id="zoom-whitelist-section" style="display:none;">
+                                <h4><i class="fas fa-user-check"></i> כניסה ללא אישור</h4>
+                                <div id="zoom-whitelist-tags" class="zoom-whitelist-tags"></div>
+                                <div style="position:relative;">
+                                    <input type="text" id="zoom-whitelist-input" placeholder="חפש שם משתמש או כיתה..." style="width:100%;background:#1a2a4a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.15);padding:0.5rem;border-radius:6px;margin-top:0.5rem;" oninput="zoomManager.searchWhitelist(this.value)">
+                                    <div id="zoom-whitelist-suggestions" class="zoom-whitelist-suggestions" style="display:none;"></div>
                                 </div>
-                                <!-- Participant permissions -->
-                                <div class="zoom-panel-section">
-                                    <h4><i class="fas fa-shield-alt"></i> הרשאות משתתפים</h4>
-                                    <div class="zoom-perm-row">
-                                        <label class="zoom-perm-label">
-                                            <input type="checkbox" id="zoom-perm-mic" checked onchange="zoomManager.updateRoomPermission('allowMic', this.checked)">
-                                            <i class="fas fa-microphone"></i> מיקרופון
-                                        </label>
-                                    </div>
-                                    <div class="zoom-perm-row">
-                                        <label class="zoom-perm-label">
-                                            <input type="checkbox" id="zoom-perm-camera" checked onchange="zoomManager.updateRoomPermission('allowCamera', this.checked)">
-                                            <i class="fas fa-video"></i> מצלמה
-                                        </label>
-                                    </div>
-                                    <div class="zoom-perm-row">
-                                        <label class="zoom-perm-label">
-                                            <input type="checkbox" id="zoom-perm-screen" checked onchange="zoomManager.updateRoomPermission('allowScreenShare', this.checked)">
-                                            <i class="fas fa-desktop"></i> שיתוף מסך
-                                        </label>
-                                    </div>
-                                </div>
-                                <!-- Chat mode -->
-                                <div class="zoom-panel-section">
-                                    <h4><i class="fas fa-comment"></i> הרשאות צ'אט</h4>
-                                    <select id="zoom-chat-mode-select" onchange="zoomManager.setChatMode(this.value)" style="width:100%;background:#1a2a4a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.15);padding:0.4rem;border-radius:6px;">
-                                        <option value="everyone">כולם יכולים לשלוח</option>
-                                        <option value="host-only">מארחים בלבד</option>
-                                    </select>
-                                </div>
-                                <!-- Whitelist with autocomplete -->
-                                <div class="zoom-panel-section" id="zoom-whitelist-section" style="display:none;">
-                                    <h4><i class="fas fa-user-check"></i> כניסה ללא אישור</h4>
-                                    <div id="zoom-whitelist-tags" class="zoom-whitelist-tags"></div>
-                                    <div style="position:relative;">
-                                        <input type="text" id="zoom-whitelist-input" placeholder="חפש שם משתמש או כיתה..." style="width:100%;background:#1a2a4a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.15);padding:0.5rem;border-radius:6px;margin-top:0.5rem;" oninput="zoomManager.searchWhitelist(this.value)">
-                                        <div id="zoom-whitelist-suggestions" class="zoom-whitelist-suggestions" style="display:none;"></div>
-                                    </div>
-                                    <button class="btn btn-secondary btn-sm" style="margin-top:0.5rem;width:100%;" onclick="zoomManager.submitWhitelist()">שמור רשימה</button>
-                                </div>
+                                <button class="btn btn-secondary btn-sm" style="margin-top:0.5rem;width:100%;" onclick="zoomManager.submitWhitelist()">שמור רשימה</button>
                             </div>
                         </div>
                     </div>
