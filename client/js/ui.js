@@ -239,7 +239,16 @@ class UIManager {
                     await this.loadAdminPage();
                     break;
                 case 'zoom':
-                    if (window.zoomManager) zoomManager.loadRoomsList();
+                    if (window.zoomManager && window.authManager) {
+                        const zUser = authManager.currentUser;
+                        if (zUser) {
+                            if (!zoomManager.socket || !zoomManager.socket.connected) {
+                                zoomManager.init(zUser.name, zUser.id || zUser._id);
+                            } else {
+                                zoomManager.loadRoomsList();
+                            }
+                        }
+                    }
                     break;
             }
         } catch (error) {

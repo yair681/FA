@@ -24,15 +24,41 @@ class ZoomManager {
         this.userName = userName;
         this.userId = userId;
 
-        const serverUrl = window.location.origin;
+        // אם יש כבר socket פעיל, נתק אותו קודם
+        if (this.socket) {
+            this.socket.disconnect();
+            this.socket = null;
+        }
+
+        this.setConnectionStatus('מתחבר...');
+
+        // השתמש בכתובת השרת כפי שמוגדרת ב-database.js, או מ-origin
+        const dbBase = window.dbManager ? window.dbManager.API_BASE : null;
+        const serverUrl = dbBase
+            ? dbBase.replace('/api', '')
+            : window.location.origin;
+
+        console.log('🔌 Connecting Zoom socket to:', serverUrl);
 
         this.socket = io(serverUrl, {
-            transports: ['websocket', 'polling']
+            transports: ['polling', 'websocket'],
+            reconnectionAttempts: 5
         });
 
         this.socket.on('connect', () => {
-            console.log('Socket connected:', this.socket.id);
+            console.log('✅ Zoom socket connected:', this.socket.id);
+            this.setConnectionStatus('מחובר');
             this.loadRoomsList();
+        });
+
+        this.socket.on('connect_error', (err) => {
+            console.error('❌ Zoom socket error:', err.message);
+            this.setConnectionStatus('שגיאת חיבור: ' + err.message);
+        });
+
+        this.socket.on('disconnect', () => {
+            console.warn('⚠️ Zoom socket disconnected');
+            this.setConnectionStatus('מנותק');
         });
 
         this.socket.on('zoom:rooms-list', (rooms) => this.renderRoomsList(rooms));
@@ -46,8 +72,18 @@ class ZoomManager {
         this.socket.on('zoom:error', (data) => alert('שגיאה: ' + data.message));
     }
 
+    setConnectionStatus(msg) {
+        const el = document.getElementById('zoom-connection-status');
+        if (el) {
+            el.textContent = msg;
+            el.style.color = msg === 'מחובר' ? 'var(--secondary)' : msg.includes('שגיאה') ? 'var(--danger)' : 'var(--warning)';
+        }
+    }
+
     loadRoomsList() {
-        if (this.socket) this.socket.emit('zoom:get-rooms');
+        if (this.socket && this.socket.connected) {
+            this.socket.emit('zoom:get-rooms');
+        }
     }
 
     renderRoomsList(rooms) {
@@ -70,7 +106,10 @@ class ZoomManager {
     }
 
     async createRoom() {
-        if (!this.socket) return;
+        if (!this.socket || !this.socket.connected) {
+            alert('לא מחובר לשרת. נסה לרענן את העמוד.');
+            return;
+        }
         const nameInput = document.getElementById('zoom-room-name-input');
         const roomName = nameInput ? nameInput.value.trim() : '';
         if (!roomName) { alert('יש להזין שם לחדר'); return; }
@@ -86,7 +125,10 @@ class ZoomManager {
     }
 
     async joinRoom(roomId) {
-        if (!this.socket) return;
+        if (!this.socket || !this.socket.connected) {
+            alert('לא מחובר לשרת. נסה לרענן את העמוד.');
+            return;
+        }
         await this.startLocalStream();
         this.socket.emit('zoom:join-room', {
             roomId,
