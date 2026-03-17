@@ -522,29 +522,41 @@ class ZoomManager {
         }
         try {
             const includeAudio = document.getElementById('zoom-screen-audio')?.checked ?? false;
-            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: includeAudio });
+            this.screenStream = await navigator.mediaDevices.getDisplayMedia({
+                video: { cursor: 'always', displaySurface: 'monitor' },
+                audio: includeAudio
+            });
             const videoTrack = this.screenStream.getVideoTracks()[0];
             const audioTrack = this.screenStream.getAudioTracks()[0] || null;
 
+            // await כל החלפת טראק כדי לוודא שנשלח לצד השני
+            const replacePromises = [];
             this.peers.forEach(pc => {
-                // החלף טראק וידאו
                 const vs = pc.getSenders().find(s => s.track?.kind === 'video');
-                if (vs && videoTrack) vs.replaceTrack(videoTrack);
-                // החלף טראק אודיו אם הוגדר שיתוף אודיו
+                if (vs && videoTrack) replacePromises.push(vs.replaceTrack(videoTrack));
                 if (audioTrack) {
                     const as = pc.getSenders().find(s => s.track?.kind === 'audio');
-                    if (as) as.replaceTrack(audioTrack);
+                    if (as) replacePromises.push(as.replaceTrack(audioTrack));
                 }
             });
+            await Promise.all(replacePromises);
 
             const lv = document.getElementById('local-video');
-            if (lv) lv.srcObject = this.screenStream;
+            if (lv) {
+                lv.srcObject = this.screenStream;
+                lv.style.objectFit = 'contain';
+                lv.style.background = '#000';
+            }
             this.isScreenSharing = true;
             this.socket.emit('zoom:screen-share-started', { roomId: this.currentRoomId });
             const btn = document.getElementById('zoom-screen-btn');
             if (btn) { btn.classList.add('active'); btn.title = 'עצור שיתוף'; }
             this.setDominantTile('tile-local', true);
             videoTrack.onended = () => this.stopScreenShare();
+
+            if (includeAudio && !audioTrack) {
+                this._showToast('הדפדפן לא אפשר שיתוף אודיו — בחר "שתף כרטיסייה" או "חלון" ולא "מסך שלם"');
+            }
         } catch(e) { if (e.name !== 'NotAllowedError') alert('שגיאה בשיתוף מסך: ' + e.message); }
     }
 
@@ -565,7 +577,11 @@ class ZoomManager {
         });
 
         const lv = document.getElementById('local-video');
-        if (lv && this.localStream) lv.srcObject = this.localStream;
+        if (lv && this.localStream) {
+            lv.srcObject = this.localStream;
+            lv.style.objectFit = '';
+            lv.style.background = '';
+        }
         this.screenStream?.getTracks().forEach(t => t.stop());
         this.screenStream = null;
         this.isScreenSharing = false;
