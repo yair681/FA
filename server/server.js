@@ -26,98 +26,211 @@ const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 
 // --- Zoom / WebRTC Room Management ---
-const zoomRooms = new Map(); // roomId => { name, hostId, users: Map(socketId => { name, userId }) }
+const zoomRooms = new Map();
+let zoomCreatePermission = 'teacher'; // 'teacher' | 'all'
+
+function getParticipants(room) {
+  const list = [];
+  room.users.forEach((u, sid) => {
+    list.push({ socketId: sid, name: u.name, userId: u.userId,
+      isHost: sid === room.hostSocketId, isCoHost: u.isCoHost });
+  });
+  return list;
+}
+function isHostOrCoHost(socketId, room) {
+  if (socketId === room.hostSocketId) return true;
+  const u = room.users.get(socketId); return u && u.isCoHost;
+}
+function broadcastRooms() {
+  const list = [];
+  zoomRooms.forEach((r, id) => list.push({ roomId: id, name: r.name, participants: r.users.size }));
+  io.emit('zoom:rooms-list', list);
+}
+function notifyWaitingUpdate(room) {
+  const waitingList = Array.from(room.waitingRoom.values()).map(w => ({ socketId: w.socketId, name: w.name }));
+  const targets = [room.hostSocketId, ...Array.from(room.users.entries()).filter(([,u]) => u.isCoHost).map(([sid]) => sid)];
+  targets.forEach(sid => io.to(sid).emit('zoom:waiting-update', { waitingList }));
+}
+function admitUser(targetSocket, room, roomId, userName, userId) {
+  room.users.set(targetSocket.id, { name: userName, userId, isCoHost: false });
+  targetSocket.join(roomId);
+  const existingUsers = [];
+  room.users.forEach((u, sid) => {
+    if (sid !== targetSocket.id) existingUsers.push({ socketId: sid, name: u.name, isCoHost: u.isCoHost, isHost: sid === room.hostSocketId });
+  });
+  targetSocket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers, isHost: false });
+  targetSocket.to(roomId).emit('zoom:user-joined', { socketId: targetSocket.id, name: userName });
+  io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
+  broadcastRooms();
+}
+function handleUserLeave(socket, roomId) {
+  const room = zoomRooms.get(roomId); if (!room) return;
+  room.users.delete(socket.id);
+  room.waitingRoom.delete(socket.id);
+  socket.leave(roomId);
+  if (room.screenShareSocketId === socket.id) {
+    room.screenShareSocketId = null;
+    io.to(roomId).emit('zoom:screen-share-stopped', { socketId: socket.id });
+  }
+  socket.to(roomId).emit('zoom:user-left', { socketId: socket.id });
+  if (socket.id === room.hostSocketId && room.users.size > 0) {
+    // העבר מארחות לאחד מהמשתתפים
+    let newHost = null;
+    for (const [sid, u] of room.users.entries()) { if (u.isCoHost) { newHost = sid; break; } }
+    if (!newHost) newHost = room.users.keys().next().value;
+    room.hostSocketId = newHost;
+    if (room.users.has(newHost)) room.users.get(newHost).isCoHost = false;
+    io.to(newHost).emit('zoom:role-changed', { role: 'host' });
+    io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
+  } else if (room.users.size === 0) {
+    zoomRooms.delete(roomId);
+  } else {
+    io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
+  }
+  broadcastRooms();
+}
 
 io.on('connection', (socket) => {
 
-  socket.on('zoom:create-room', ({ roomId, roomName, userName, userId }) => {
+  socket.on('zoom:create-room', ({ roomId, roomName, userName, userId, userRole }) => {
+    if (zoomCreatePermission === 'teacher' && userRole !== 'teacher' && userRole !== 'admin') {
+      socket.emit('zoom:error', { message: 'אין לך הרשאה ליצור חדרי שיחה' }); return;
+    }
     zoomRooms.set(roomId, {
-      name: roomName,
-      hostId: socket.id,
-      users: new Map([[socket.id, { name: userName, userId }]])
+      name: roomName, hostSocketId: socket.id, hostUserId: userId,
+      users: new Map([[socket.id, { name: userName, userId, isCoHost: false }]]),
+      waitingRoom: new Map(),
+      whitelist: new Set(),
+      screenShareSocketId: null
     });
     socket.join(roomId);
     socket.emit('zoom:room-created', { roomId, roomName });
+    broadcastRooms();
   });
 
-  socket.on('zoom:join-room', ({ roomId, userName, userId }) => {
+  socket.on('zoom:request-join', ({ roomId, userName, userId }) => {
     const room = zoomRooms.get(roomId);
-    if (!room) {
-      socket.emit('zoom:error', { message: 'החדר לא נמצא' });
-      return;
+    if (!room) { socket.emit('zoom:error', { message: 'החדר לא נמצא' }); return; }
+    if (room.whitelist.has(userId)) {
+      admitUser(socket, room, roomId, userName, userId); return;
     }
-    room.users.set(socket.id, { name: userName, userId });
-    socket.join(roomId);
+    room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId });
+    socket.emit('zoom:waiting', { roomName: room.name });
+    notifyWaitingUpdate(room);
+  });
 
-    // שלח למצטרף את רשימת כל המשתתפים הקיימים
-    const existingUsers = [];
-    room.users.forEach((user, sid) => {
-      if (sid !== socket.id) existingUsers.push({ socketId: sid, name: user.name });
-    });
-    socket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers });
+  socket.on('zoom:approve-join', ({ roomId, targetSocketId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const w = room.waitingRoom.get(targetSocketId); if (!w) return;
+    room.waitingRoom.delete(targetSocketId);
+    const tSocket = io.sockets.sockets.get(targetSocketId);
+    if (tSocket) admitUser(tSocket, room, roomId, w.name, w.userId);
+    notifyWaitingUpdate(room);
+  });
 
-    // הודע לכולם במחדר שהצטרף משתמש חדש
-    socket.to(roomId).emit('zoom:user-joined', {
-      socketId: socket.id,
-      name: userName
-    });
+  socket.on('zoom:deny-join', ({ roomId, targetSocketId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.waitingRoom.delete(targetSocketId);
+    io.to(targetSocketId).emit('zoom:denied');
+    notifyWaitingUpdate(room);
+  });
+
+  socket.on('zoom:kick', ({ roomId, targetSocketId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (targetSocketId === room.hostSocketId) return;
+    io.to(targetSocketId).emit('zoom:kicked');
+    const tSocket = io.sockets.sockets.get(targetSocketId);
+    if (tSocket) handleUserLeave(tSocket, roomId);
+  });
+
+  socket.on('zoom:assign-cohost', ({ roomId, targetSocketId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || socket.id !== room.hostSocketId) return;
+    const u = room.users.get(targetSocketId); if (!u) return;
+    u.isCoHost = true;
+    io.to(targetSocketId).emit('zoom:role-changed', { role: 'cohost' });
+    io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
+  });
+
+  socket.on('zoom:remove-cohost', ({ roomId, targetSocketId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || socket.id !== room.hostSocketId) return;
+    const u = room.users.get(targetSocketId); if (!u) return;
+    u.isCoHost = false;
+    io.to(targetSocketId).emit('zoom:role-changed', { role: 'participant' });
+    io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
+  });
+
+  socket.on('zoom:update-whitelist', ({ roomId, userIds }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.whitelist = new Set(userIds);
+    socket.emit('zoom:whitelist-updated');
+  });
+
+  socket.on('zoom:end-meeting', ({ roomId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || socket.id !== room.hostSocketId) return;
+    io.to(roomId).emit('zoom:meeting-ended', { reason: 'host' });
+    zoomRooms.delete(roomId); broadcastRooms();
+  });
+
+  socket.on('zoom:admin-close', ({ roomId }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    io.to(roomId).emit('zoom:meeting-ended', { reason: 'admin' });
+    zoomRooms.delete(roomId); broadcastRooms();
+  });
+
+  socket.on('zoom:set-create-permission', ({ permission }) => {
+    zoomCreatePermission = permission;
+    io.emit('zoom:create-permission', { permission });
   });
 
   socket.on('zoom:get-rooms', () => {
-    const rooms = [];
-    zoomRooms.forEach((room, roomId) => {
-      rooms.push({ roomId, name: room.name, participants: room.users.size });
-    });
-    socket.emit('zoom:rooms-list', rooms);
+    const list = [];
+    zoomRooms.forEach((r, id) => list.push({ roomId: id, name: r.name, participants: r.users.size }));
+    socket.emit('zoom:rooms-list', list);
+  });
+
+  socket.on('zoom:get-create-permission', () => {
+    socket.emit('zoom:create-permission', { permission: zoomCreatePermission });
+  });
+
+  socket.on('zoom:screen-share-started', ({ roomId }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    room.screenShareSocketId = socket.id;
+    socket.to(roomId).emit('zoom:screen-share-started', { socketId: socket.id });
+  });
+
+  socket.on('zoom:screen-share-stopped', ({ roomId }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    if (room.screenShareSocketId === socket.id) room.screenShareSocketId = null;
+    socket.to(roomId).emit('zoom:screen-share-stopped', { socketId: socket.id });
   });
 
   // WebRTC Signaling
   socket.on('zoom:offer', ({ targetSocketId, offer, fromName }) => {
-    io.to(targetSocketId).emit('zoom:offer', {
-      fromSocketId: socket.id,
-      fromName,
-      offer
-    });
+    io.to(targetSocketId).emit('zoom:offer', { fromSocketId: socket.id, fromName, offer });
   });
-
   socket.on('zoom:answer', ({ targetSocketId, answer }) => {
-    io.to(targetSocketId).emit('zoom:answer', {
-      fromSocketId: socket.id,
-      answer
-    });
+    io.to(targetSocketId).emit('zoom:answer', { fromSocketId: socket.id, answer });
   });
-
   socket.on('zoom:ice-candidate', ({ targetSocketId, candidate }) => {
-    io.to(targetSocketId).emit('zoom:ice-candidate', {
-      fromSocketId: socket.id,
-      candidate
-    });
+    io.to(targetSocketId).emit('zoom:ice-candidate', { fromSocketId: socket.id, candidate });
   });
 
-  socket.on('zoom:leave-room', ({ roomId }) => {
-    handleLeaveRoom(socket, roomId);
-  });
-
+  socket.on('zoom:leave-room', ({ roomId }) => handleUserLeave(socket, roomId));
   socket.on('disconnect', () => {
-    zoomRooms.forEach((room, roomId) => {
-      if (room.users.has(socket.id)) {
-        handleLeaveRoom(socket, roomId);
-      }
+    zoomRooms.forEach((_, roomId) => {
+      const room = zoomRooms.get(roomId);
+      if (room && (room.users.has(socket.id) || room.waitingRoom.has(socket.id)))
+        handleUserLeave(socket, roomId);
     });
   });
 });
-
-function handleLeaveRoom(socket, roomId) {
-  const room = zoomRooms.get(roomId);
-  if (!room) return;
-  const user = room.users.get(socket.id);
-  room.users.delete(socket.id);
-  socket.leave(roomId);
-  socket.to(roomId).emit('zoom:user-left', { socketId: socket.id });
-  if (room.users.size === 0) {
-    zoomRooms.delete(roomId);
-  }
-}
 // --- End Zoom ---
 
 // Middleware

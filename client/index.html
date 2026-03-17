@@ -171,8 +171,7 @@
             <div id="zoom-page" class="page" style="display:none;">
                 <h2 class="page-title">שיחות וידאו</h2>
 
-                <!-- סטטוס חיבור -->
-                <div style="margin-bottom:1rem; font-size:0.9rem;">
+                <div class="zoom-status-bar">
                     סטטוס: <span id="zoom-connection-status" style="font-weight:600; color:var(--warning);">לא מחובר</span>
                 </div>
 
@@ -180,18 +179,24 @@
                 <div id="zoom-lobby">
                     <div class="zoom-lobby-grid">
                         <!-- יצירת חדר -->
-                        <div class="card">
-                            <div class="card-header">
-                                <h2 class="card-title">פתיחת חדר חדש</h2>
-                            </div>
-                            <div style="padding: 1rem;">
+                        <div class="card" id="zoom-create-card">
+                            <div class="card-header"><h2 class="card-title">פתיחת חדר חדש</h2></div>
+                            <div style="padding:1rem;">
                                 <div class="form-group">
-                                    <label for="zoom-room-name-input">שם החדר</label>
+                                    <label>שם החדר</label>
                                     <input type="text" id="zoom-room-name-input" placeholder="לדוגמה: שיעור מתמטיקה ז1">
                                 </div>
-                                <button class="btn" onclick="zoomManager.createRoom()">
+                                <button id="zoom-create-btn" class="btn" onclick="zoomManager.createRoom()">
                                     <i class="fas fa-video"></i> פתח חדר
                                 </button>
+                                <!-- הגדרות אדמין -->
+                                <div id="zoom-admin-permission-section" style="display:none; margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--light);">
+                                    <label style="font-size:0.9rem; font-weight:600;">מי יכול ליצור שיחות</label>
+                                    <select id="zoom-permission-select" class="form-control" style="margin-top:0.5rem;" onchange="zoomManager.setCreatePermission(this.value)">
+                                        <option value="teacher">מורים ומנהלים בלבד</option>
+                                        <option value="all">כל משתמש מחובר</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
 
@@ -199,41 +204,66 @@
                         <div class="card">
                             <div class="card-header">
                                 <h2 class="card-title">חדרים פעילים</h2>
-                                <button class="btn btn-secondary" onclick="zoomManager.loadRoomsList()">
-                                    <i class="fas fa-sync-alt"></i> רענן
-                                </button>
+                                <button class="btn btn-secondary" onclick="zoomManager.loadRoomsList()"><i class="fas fa-sync-alt"></i> רענן</button>
                             </div>
-                            <div id="zoom-rooms-list" style="padding: 1rem;">
-                                <p class="zoom-no-rooms">אין חדרי שיחה פעילים כרגע</p>
+                            <div id="zoom-rooms-list" style="padding:1rem;">
+                                <p class="zoom-no-rooms">אין חדרי שיחה פעילים</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- חדר שיחה פעיל -->
+                <!-- מסך המתנה -->
+                <div id="zoom-waiting-screen" style="display:none; flex-direction:column; align-items:center; justify-content:center; min-height:50vh; text-align:center;">
+                    <div class="zoom-waiting-icon"><i class="fas fa-hourglass-half"></i></div>
+                    <h3>ממתין לאישור המארח...</h3>
+                    <p class="zoom-waiting-room-name" style="color:var(--gray); margin-top:0.5rem;"></p>
+                    <button class="btn btn-secondary" style="margin-top:1.5rem;" onclick="zoomManager.onDenied()">ביטול</button>
+                </div>
+
+                <!-- שיחה פעילה -->
                 <div id="zoom-call-container" style="display:none; flex-direction:column;">
+                    <!-- כותרת -->
                     <div class="zoom-call-header">
                         <div class="zoom-call-header-info">
-                            <i class="fas fa-video"></i>
+                            <i class="fas fa-video" style="color:var(--secondary)"></i>
                             <span id="zoom-call-title">שיחה</span>
                             <span id="zoom-participant-count" class="zoom-count-badge">0 משתתפים</span>
                         </div>
                         <div class="zoom-controls">
-                            <button id="zoom-toggle-audio" class="zoom-control-btn" title="השתק/הפעל מיקרופון" onclick="zoomManager.toggleAudio()">
-                                <i class="fas fa-microphone"></i>
-                            </button>
-                            <button id="zoom-toggle-video" class="zoom-control-btn" title="הפעל/כבה מצלמה" onclick="zoomManager.toggleVideo()">
-                                <i class="fas fa-video"></i>
-                            </button>
-                            <button id="zoom-screen-share" class="zoom-control-btn" title="שתף מסך" onclick="zoomManager.toggleScreenShare()">
-                                <i class="fas fa-desktop"></i>
-                            </button>
-                            <button class="zoom-control-btn zoom-leave-btn" title="עזוב שיחה" onclick="zoomManager.leaveRoom()">
-                                <i class="fas fa-phone-slash"></i>
-                            </button>
+                            <button id="zoom-audio-btn" class="zoom-ctrl-btn" title="מיקרופון" onclick="zoomManager.toggleAudio()"><i class="fas fa-microphone"></i></button>
+                            <button id="zoom-video-btn" class="zoom-ctrl-btn" title="מצלמה" onclick="zoomManager.toggleVideo()"><i class="fas fa-video"></i></button>
+                            <button id="zoom-screen-btn" class="zoom-ctrl-btn" title="שתף מסך" onclick="zoomManager.toggleScreenShare()"><i class="fas fa-desktop"></i></button>
+                            <button id="zoom-leave-btn" class="zoom-ctrl-btn leave" title="עזוב" onclick="zoomManager.leaveRoom()"><i class="fas fa-phone-slash"></i></button>
+                            <button id="zoom-end-meeting-btn" class="zoom-ctrl-btn end" title="סיים פגישה לכולם" style="display:none;" onclick="zoomManager.endMeeting()"><i class="fas fa-times-circle"></i> סיים</button>
                         </div>
                     </div>
-                    <div id="zoom-video-grid" class="zoom-video-grid"></div>
+
+                    <!-- גוף: גריד + לוח ניהול -->
+                    <div class="zoom-call-body">
+                        <div id="zoom-video-grid" class="zoom-video-grid"></div>
+
+                        <!-- לוח ניהול (מארח/מנהל-שותף) -->
+                        <div id="zoom-management-panel" class="zoom-management-panel" style="display:none;">
+                            <!-- ממתינים -->
+                            <div class="zoom-panel-section">
+                                <h4><i class="fas fa-user-clock"></i> ממתינים <span id="zoom-waiting-badge" class="zoom-badge-count" style="display:none;">0</span></h4>
+                                <div id="zoom-waiting-list"><p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p></div>
+                            </div>
+                            <!-- משתתפים -->
+                            <div class="zoom-panel-section">
+                                <h4><i class="fas fa-users"></i> משתתפים</h4>
+                                <div id="zoom-participants-panel"></div>
+                            </div>
+                            <!-- רשימה לבנה -->
+                            <div class="zoom-panel-section" id="zoom-whitelist-section" style="display:none;">
+                                <h4><i class="fas fa-user-check"></i> כניסה ללא אישור</h4>
+                                <small style="color:var(--gray);">מזהי משתמשים מופרדים בפסיק</small>
+                                <input type="text" id="zoom-whitelist-input" placeholder="userId1, userId2" style="margin:0.5rem 0; width:100%;">
+                                <button class="btn btn-secondary btn-sm" onclick="zoomManager.updateWhitelist()">עדכן</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <!-- ===== סוף עמוד זום ===== -->

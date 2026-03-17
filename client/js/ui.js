@@ -243,7 +243,7 @@ class UIManager {
                         const zUser = authManager.currentUser;
                         if (zUser) {
                             if (!zoomManager.socket || !zoomManager.socket.connected) {
-                                zoomManager.init(zUser.name, zUser.id || zUser._id);
+                                zoomManager.init(zUser.name, zUser.id || zUser._id, zUser.role);
                             } else {
                                 zoomManager.loadRoomsList();
                             }

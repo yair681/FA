@@ -21,7 +21,7 @@ function updateUI() {
 
         // אתחול זום אם עדיין לא אותחל
         if (window.zoomManager && !zoomManager.socket) {
-            zoomManager.init(user.name, user.id);
+            zoomManager.init(user.name, user.id, user.role);
         }
 
         // Show admin link for admin users
