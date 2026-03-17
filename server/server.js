@@ -58,7 +58,7 @@ function admitUser(targetSocket, room, roomId, userName, userId) {
   room.users.forEach((u, sid) => {
     if (sid !== targetSocket.id) existingUsers.push({ socketId: sid, name: u.name, isCoHost: u.isCoHost, isHost: sid === room.hostSocketId });
   });
-  targetSocket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers, isHost: false });
+  targetSocket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers, isHost: false, chatMode: room.chatMode || 'everyone' });
   targetSocket.to(roomId).emit('zoom:user-joined', { socketId: targetSocket.id, name: userName });
   io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
   broadcastRooms();
@@ -101,7 +101,8 @@ io.on('connection', (socket) => {
       users: new Map([[socket.id, { name: userName, userId, isCoHost: false }]]),
       waitingRoom: new Map(),
       whitelist: new Set(),
-      screenShareSocketId: null
+      screenShareSocketId: null,
+      chatMode: 'everyone'
     });
     socket.join(roomId);
     socket.emit('zoom:room-created', { roomId, roomName });
@@ -169,6 +170,27 @@ io.on('connection', (socket) => {
     if (!room || !isHostOrCoHost(socket.id, room)) return;
     room.whitelist = new Set(userIds);
     socket.emit('zoom:whitelist-updated');
+  });
+
+  socket.on('zoom:chat-message', ({ roomId, text }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    const user = room.users.get(socket.id); if (!user) return;
+    if (room.chatMode === 'host-only' && !isHostOrCoHost(socket.id, room)) return;
+    const msg = { from: user.name, text, ts: Date.now(), fromSocketId: socket.id };
+    io.to(roomId).emit('zoom:chat-message', msg);
+  });
+
+  socket.on('zoom:set-chat-mode', ({ roomId, mode }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.chatMode = mode;
+    io.to(roomId).emit('zoom:chat-mode-changed', { mode });
+  });
+
+  socket.on('zoom:mute-user', ({ roomId, targetSocketId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    io.to(targetSocketId).emit('zoom:muted-by-host');
   });
 
   socket.on('zoom:end-meeting', ({ roomId }) => {

@@ -16,6 +16,9 @@ class ZoomManager {
         this.isVideoOn = true;
         this.isScreenSharing = false;
         this.screenShareSocketId = null;
+        this.unreadChat = 0;
+        this.chatMode = 'everyone';
+        this.whitelistItems = [];
 
         this.iceServers = {
             iceServers: [
@@ -38,12 +41,12 @@ class ZoomManager {
 
         const base = window.dbManager ? window.dbManager.API_BASE : window.location.origin + '/api';
         const serverUrl = base.replace('/api', '');
-        console.log('🔌 Zoom connecting to:', serverUrl);
+        console.log('Zoom connecting to:', serverUrl);
 
         this.socket = io(serverUrl, { transports: ['polling', 'websocket'], reconnectionAttempts: 5 });
 
         this.socket.on('connect', () => {
-            console.log('✅ Zoom socket:', this.socket.id);
+            console.log('Zoom socket:', this.socket.id);
             this.setStatus('מחובר');
             this.socket.emit('zoom:get-create-permission');
             this.loadRoomsList();
@@ -51,26 +54,29 @@ class ZoomManager {
         this.socket.on('connect_error', e => this.setStatus('שגיאת חיבור: ' + e.message));
         this.socket.on('disconnect', () => this.setStatus('מנותק'));
 
-        this.socket.on('zoom:rooms-list',        d => this.renderRoomsList(d));
-        this.socket.on('zoom:create-permission', d => this.applyCreatePermission(d.permission));
-        this.socket.on('zoom:room-created',      d => this.onRoomCreated(d));
-        this.socket.on('zoom:room-joined',       d => this.onRoomJoined(d));
-        this.socket.on('zoom:user-joined',       d => this.onUserJoined(d));
-        this.socket.on('zoom:user-left',         d => this.onUserLeft(d));
-        this.socket.on('zoom:waiting',           d => this.onWaiting(d));
-        this.socket.on('zoom:waiting-update',    d => this.renderWaitingList(d.waitingList));
-        this.socket.on('zoom:denied',            () => this.onDenied());
-        this.socket.on('zoom:kicked',            () => this.onKicked());
-        this.socket.on('zoom:meeting-ended',     d => this.onMeetingEnded(d));
-        this.socket.on('zoom:participants-update', d => this.renderParticipants(d.participants));
-        this.socket.on('zoom:role-changed',      d => this.onRoleChanged(d));
+        this.socket.on('zoom:rooms-list',           d => this.renderRoomsList(d));
+        this.socket.on('zoom:create-permission',    d => this.applyCreatePermission(d.permission));
+        this.socket.on('zoom:room-created',         d => this.onRoomCreated(d));
+        this.socket.on('zoom:room-joined',          d => this.onRoomJoined(d));
+        this.socket.on('zoom:user-joined',          d => this.onUserJoined(d));
+        this.socket.on('zoom:user-left',            d => this.onUserLeft(d));
+        this.socket.on('zoom:waiting',              d => this.onWaiting(d));
+        this.socket.on('zoom:waiting-update',       d => this.renderWaitingList(d.waitingList));
+        this.socket.on('zoom:denied',               () => this.onDenied());
+        this.socket.on('zoom:kicked',               () => this.onKicked());
+        this.socket.on('zoom:meeting-ended',        d => this.onMeetingEnded(d));
+        this.socket.on('zoom:participants-update',  d => this.renderParticipants(d.participants));
+        this.socket.on('zoom:role-changed',         d => this.onRoleChanged(d));
         this.socket.on('zoom:screen-share-started', d => this.onRemoteScreenShareStarted(d));
         this.socket.on('zoom:screen-share-stopped', d => this.onRemoteScreenShareStopped(d));
-        this.socket.on('zoom:offer',             d => this.onOffer(d));
-        this.socket.on('zoom:answer',            d => this.onAnswer(d));
-        this.socket.on('zoom:ice-candidate',     d => this.onIceCandidate(d));
-        this.socket.on('zoom:error',             d => { alert('שגיאה: ' + d.message); });
-        this.socket.on('zoom:whitelist-updated', () => { alert('הרשימה הלבנה עודכנה'); });
+        this.socket.on('zoom:offer',                d => this.onOffer(d));
+        this.socket.on('zoom:answer',               d => this.onAnswer(d));
+        this.socket.on('zoom:ice-candidate',        d => this.onIceCandidate(d));
+        this.socket.on('zoom:error',                d => { alert('שגיאה: ' + d.message); });
+        this.socket.on('zoom:whitelist-updated',    () => { alert('הרשימה הלבנה עודכנה'); });
+        this.socket.on('zoom:chat-message',         d => this.appendChatMessage(d));
+        this.socket.on('zoom:chat-mode-changed',    d => this.onChatModeChanged(d));
+        this.socket.on('zoom:muted-by-host',        () => this.onMutedByHost());
     }
 
     // ── Status / Permission ───────────────────────────────────────────────────
@@ -82,12 +88,11 @@ class ZoomManager {
     }
 
     applyCreatePermission(permission) {
-        const btn = document.getElementById('zoom-create-btn');
-        if (!btn) return;
-        const canCreate = permission === 'all' || this.userRole === 'teacher' || this.userRole === 'admin';
-        btn.style.display = canCreate ? 'inline-block' : 'none';
-        const adminSection = document.getElementById('zoom-admin-permission-section');
-        if (adminSection) adminSection.style.display = this.userRole === 'admin' ? 'block' : 'none';
+        const card = document.getElementById('zoom-create-card');
+        if (card) {
+            const canCreate = permission === 'all' || this.userRole === 'teacher' || this.userRole === 'admin';
+            card.style.display = canCreate ? '' : 'none';
+        }
         const permSelect = document.getElementById('zoom-permission-select');
         if (permSelect) permSelect.value = permission;
     }
@@ -144,18 +149,21 @@ class ZoomManager {
     async onRoomCreated({ roomId, roomName }) {
         this.currentRoomId = roomId;
         this.isHost = true;
+        this.chatMode = 'everyone';
         this.showCallUI(roomName);
         this.addLocalTile();
         this.updateHostControls();
     }
 
-    async onRoomJoined({ roomId, roomName, existingUsers, isHost }) {
+    async onRoomJoined({ roomId, roomName, existingUsers, isHost, chatMode }) {
         this.currentRoomId = roomId;
         this.isHost = isHost;
+        this.chatMode = chatMode || 'everyone';
         this.hideWaitingScreen();
         this.showCallUI(roomName);
         this.addLocalTile();
         this.updateHostControls();
+        this.updateChatUI();
         for (const u of existingUsers) {
             this.addRemoteTilePlaceholder(u.socketId, u.name);
             await this.createOffer(u.socketId, u.name);
@@ -231,6 +239,7 @@ class ZoomManager {
                     : `<button class="zoom-action-btn" onclick="zoomManager.assignCohost('${p.socketId}')">מנה מנהל</button>`;
             }
             if (canManage) {
+                actions += `<button class="zoom-action-btn" onclick="zoomManager.muteUser('${p.socketId}')">השתק</button>`;
                 actions += `<button class="zoom-action-btn danger" onclick="zoomManager.kick('${p.socketId}')">הסר משיחה</button>`;
             }
             return `<div class="zoom-participant-row ${isMe ? 'me' : ''}">
@@ -245,7 +254,7 @@ class ZoomManager {
         const el = document.getElementById('zoom-waiting-list');
         if (!el) return;
         const badge = document.getElementById('zoom-waiting-badge');
-        if (badge) { badge.textContent = waitingList.length; badge.style.display = waitingList.length ? 'inline' : 'none'; }
+        if (badge) { badge.textContent = waitingList.length; badge.style.display = waitingList.length ? 'inline-flex' : 'none'; }
         if (!waitingList.length) { el.innerHTML = '<p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p>'; return; }
         el.innerHTML = waitingList.map(w => `
             <div class="zoom-waiting-row">
@@ -263,13 +272,7 @@ class ZoomManager {
     kick(targetSocketId)        { if (confirm('להסיר משתתף זה מהשיחה?')) this.socket.emit('zoom:kick', { roomId: this.currentRoomId, targetSocketId }); }
     assignCohost(targetSocketId){ this.socket.emit('zoom:assign-cohost', { roomId: this.currentRoomId, targetSocketId }); }
     removeCohost(targetSocketId){ this.socket.emit('zoom:remove-cohost', { roomId: this.currentRoomId, targetSocketId }); }
-
-    updateWhitelist() {
-        const input = document.getElementById('zoom-whitelist-input');
-        if (!input) return;
-        const ids = input.value.split(',').map(s => s.trim()).filter(Boolean);
-        this.socket.emit('zoom:update-whitelist', { roomId: this.currentRoomId, userIds: ids });
-    }
+    muteUser(targetSocketId)    { this.socket.emit('zoom:mute-user', { roomId: this.currentRoomId, targetSocketId }); }
 
     endMeeting() {
         if (!confirm('לסיים את הפגישה לכולם?')) return;
@@ -278,14 +281,167 @@ class ZoomManager {
     }
 
     updateHostControls() {
-        const mgmt = document.getElementById('zoom-management-panel');
-        if (mgmt) mgmt.style.display = (this.isHost || this.isCoHost) ? 'flex' : 'none';
-        const endBtn = document.getElementById('zoom-end-meeting-btn');
-        if (endBtn) endBtn.style.display = this.isHost ? 'inline-flex' : 'none';
-        const leaveBtn = document.getElementById('zoom-leave-btn');
-        if (leaveBtn) leaveBtn.style.display = this.isHost ? 'none' : 'inline-flex';
+        // Show/hide manage tab for host/cohost
+        const tabManage = document.getElementById('tab-manage');
+        if (tabManage) tabManage.style.display = (this.isHost || this.isCoHost) ? '' : 'none';
+        // Show/hide whitelist section for host only
         const whitelist = document.getElementById('zoom-whitelist-section');
         if (whitelist) whitelist.style.display = this.isHost ? 'block' : 'none';
+        // Show end-meeting btn for host, hide for others
+        const endBtn = document.getElementById('zoom-end-meeting-btn');
+        if (endBtn) endBtn.style.display = this.isHost ? 'inline-flex' : 'none';
+        // Show leave btn for non-host (host has end meeting)
+        const leaveBtn = document.getElementById('zoom-leave-btn');
+        if (leaveBtn) leaveBtn.style.display = this.isHost ? 'none' : 'inline-flex';
+    }
+
+    // ── Tab switching ──────────────────────────────────────────────────────────
+    switchTab(tab) {
+        document.querySelectorAll('.zoom-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.zoom-tab-content').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-' + tab)?.classList.add('active');
+        document.getElementById('tab-content-' + tab)?.classList.add('active');
+        if (tab === 'chat') {
+            const badge = document.getElementById('zoom-chat-badge');
+            if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+            this.unreadChat = 0;
+        }
+    }
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
+    sendChat() {
+        const input = document.getElementById('zoom-chat-input');
+        const text = input?.value.trim();
+        if (!text || !this.socket) return;
+        this.socket.emit('zoom:chat-message', { roomId: this.currentRoomId, text });
+        input.value = '';
+    }
+
+    appendChatMessage({ from, text, ts, fromSocketId }) {
+        const msgs = document.getElementById('zoom-chat-messages');
+        if (!msgs) return;
+        const isMe = this.socket && fromSocketId === this.socket.id;
+        const time = new Date(ts).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+        const div = document.createElement('div');
+        div.className = 'zoom-chat-msg' + (isMe ? ' mine' : '');
+        div.innerHTML = `<div class="zoom-chat-msg-from">${isMe ? 'אתה' : from} · ${time}</div><div>${text}</div>`;
+        msgs.appendChild(div);
+        msgs.scrollTop = msgs.scrollHeight;
+        // Update badge if chat tab not active
+        const chatTab = document.getElementById('tab-content-chat');
+        if (!chatTab?.classList.contains('active')) {
+            this.unreadChat++;
+            const badge = document.getElementById('zoom-chat-badge');
+            if (badge) { badge.textContent = this.unreadChat; badge.style.display = 'inline-flex'; }
+        }
+    }
+
+    onChatModeChanged({ mode }) {
+        this.chatMode = mode;
+        this.updateChatUI();
+        const sel = document.getElementById('zoom-chat-mode-select');
+        if (sel) sel.value = mode;
+    }
+
+    updateChatUI() {
+        const input = document.getElementById('zoom-chat-input');
+        if (!input) return;
+        const canChat = this.chatMode === 'everyone' || this.isHost || this.isCoHost;
+        input.disabled = !canChat;
+        input.placeholder = canChat ? 'כתוב הודעה...' : 'רק המארח יכול לשלוח הודעות';
+    }
+
+    setChatMode(mode) {
+        if (!this.socket || (!this.isHost && !this.isCoHost)) return;
+        this.socket.emit('zoom:set-chat-mode', { roomId: this.currentRoomId, mode });
+    }
+
+    // ── Mute by host ──────────────────────────────────────────────────────────
+    onMutedByHost() {
+        if (this.isAudioOn) {
+            this.toggleAudio();
+        }
+        this._showToast('הושתקת על ידי המארח');
+    }
+
+    _showToast(msg) {
+        let toast = document.getElementById('zoom-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'zoom-toast';
+            toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.8);color:#fff;padding:0.6rem 1.2rem;border-radius:20px;font-size:0.9rem;z-index:9999;transition:opacity 0.3s;';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = msg;
+        toast.style.opacity = '1';
+        clearTimeout(toast._hideTimer);
+        toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+    }
+
+    // ── Whitelist autocomplete ────────────────────────────────────────────────
+    async searchWhitelist(query) {
+        const sugEl = document.getElementById('zoom-whitelist-suggestions');
+        if (!sugEl) return;
+        if (!query || query.length < 1) { sugEl.style.display = 'none'; return; }
+        try {
+            const [usersResp, classesResp] = await Promise.all([
+                dbManager.makeRequest('/users'),
+                dbManager.makeRequest('/classes')
+            ]);
+            const q = query.toLowerCase();
+            const results = [];
+            if (usersResp && Array.isArray(usersResp)) {
+                usersResp.filter(u => u.name.toLowerCase().includes(q))
+                  .slice(0, 5)
+                  .forEach(u => results.push({ type: 'user', id: u._id, name: u.name }));
+            }
+            if (classesResp && Array.isArray(classesResp)) {
+                classesResp.filter(c => c.name.toLowerCase().includes(q))
+                  .slice(0, 3)
+                  .forEach(c => results.push({ type: 'class', id: c._id, name: c.name, members: (c.students||[]).map(s => s._id || s) }));
+            }
+            if (!results.length) { sugEl.style.display = 'none'; return; }
+            sugEl.innerHTML = results.map(r => `
+                <div class="zoom-whitelist-suggestion" onclick="zoomManager.addWhitelistItem(${JSON.stringify(r).replace(/"/g, '&quot;')})">
+                    <i class="fas fa-${r.type==='class'?'users':'user'}"></i> ${r.name}
+                    ${r.type==='class' ? `<small style="color:#aaa">(כיתה)</small>` : ''}
+                </div>`).join('');
+            sugEl.style.display = 'block';
+        } catch(e) { sugEl.style.display = 'none'; }
+    }
+
+    addWhitelistItem(item) {
+        if (this.whitelistItems.find(i => i.id === item.id)) return;
+        this.whitelistItems.push(item);
+        this.renderWhitelistTags();
+        const input = document.getElementById('zoom-whitelist-input');
+        if (input) input.value = '';
+        const sug = document.getElementById('zoom-whitelist-suggestions');
+        if (sug) sug.style.display = 'none';
+    }
+
+    renderWhitelistTags() {
+        const el = document.getElementById('zoom-whitelist-tags');
+        if (!el) return;
+        el.innerHTML = this.whitelistItems.map(item => `
+            <span class="zoom-whitelist-tag">
+                <i class="fas fa-${item.type==='class'?'users':'user'}"></i> ${item.name}
+                <button onclick="zoomManager.removeWhitelistItem('${item.id}')">&times;</button>
+            </span>`).join('');
+    }
+
+    removeWhitelistItem(id) {
+        this.whitelistItems = this.whitelistItems.filter(i => i.id !== id);
+        this.renderWhitelistTags();
+    }
+
+    submitWhitelist() {
+        const userIds = new Set();
+        this.whitelistItems.forEach(item => {
+            if (item.type === 'user') userIds.add(item.id);
+            else if (item.type === 'class' && item.members) item.members.forEach(id => userIds.add(id));
+        });
+        this.socket.emit('zoom:update-whitelist', { roomId: this.currentRoomId, userIds: Array.from(userIds) });
     }
 
     // ── Screen Share ──────────────────────────────────────────────────────────
@@ -304,7 +460,6 @@ class ZoomManager {
             this.socket.emit('zoom:screen-share-started', { roomId: this.currentRoomId });
             const btn = document.getElementById('zoom-screen-btn');
             if (btn) { btn.classList.add('active'); btn.title = 'עצור שיתוף'; }
-            // Make local tile dominant
             this.setDominantTile('tile-local', true);
             track.onended = () => this.stopScreenShare();
         } catch(e) { if (e.name !== 'NotAllowedError') alert('שגיאה בשיתוף מסך: ' + e.message); }
@@ -330,6 +485,8 @@ class ZoomManager {
 
     onRemoteScreenShareStarted({ socketId }) {
         this.screenShareSocketId = socketId;
+        const grid = document.getElementById('zoom-video-grid');
+        if (grid) grid.classList.add('has-screen-share');
         this.setDominantTile('tile-' + socketId, true);
     }
 
@@ -339,10 +496,14 @@ class ZoomManager {
     }
 
     setDominantTile(tileId, dominant) {
+        const grid = document.getElementById('zoom-video-grid');
         document.querySelectorAll('.video-tile').forEach(t => t.classList.remove('dominant'));
         if (dominant) {
+            if (grid) grid.classList.add('has-screen-share');
             const t = document.getElementById(tileId);
             if (t) t.classList.add('dominant');
+        } else {
+            if (grid) grid.classList.remove('has-screen-share');
         }
     }
 
@@ -350,6 +511,8 @@ class ZoomManager {
         this.screenShareSocketId = null;
         const tile = document.getElementById('tile-' + socketId);
         if (tile) tile.classList.remove('dominant');
+        const grid = document.getElementById('zoom-video-grid');
+        if (grid) grid.classList.remove('has-screen-share');
     }
 
     // ── WebRTC ────────────────────────────────────────────────────────────────
@@ -492,7 +655,6 @@ class ZoomManager {
             tile = this._makeTile('tile-' + socketId, '', name);
             document.getElementById('zoom-video-grid')?.appendChild(tile);
         }
-        // Remove avatar placeholder if present
         const avatar = tile.querySelector('.video-avatar');
         if (avatar) avatar.remove();
         let vid = document.getElementById('video-' + socketId);
@@ -531,19 +693,24 @@ class ZoomManager {
         if (c) c.style.display = 'flex';
         const t = document.getElementById('zoom-call-title');
         if (t) t.textContent = roomName;
+        // Reset tabs to participants
+        this.switchTab('participants');
     }
 
     showLobbyUI() {
         const c = document.getElementById('zoom-call-container');
         if (c) c.style.display = 'none';
         document.getElementById('zoom-lobby').style.display = 'block';
-        document.getElementById('zoom-waiting-screen').style.display = 'none';
+        const ws = document.getElementById('zoom-waiting-screen');
+        if (ws) ws.style.display = 'none';
         const grid = document.getElementById('zoom-video-grid');
         if (grid) grid.innerHTML = '';
         const pp = document.getElementById('zoom-participants-panel');
         if (pp) pp.innerHTML = '';
         const wl = document.getElementById('zoom-waiting-list');
         if (wl) wl.innerHTML = '';
+        const msgs = document.getElementById('zoom-chat-messages');
+        if (msgs) msgs.innerHTML = '';
     }
 
     leaveRoom() {
@@ -560,6 +727,7 @@ class ZoomManager {
         this.currentRoomId = null; this.isHost = false; this.isCoHost = false;
         this.isAudioOn = true; this.isVideoOn = true; this.isScreenSharing = false;
         this.screenShareSocketId = null;
+        this.unreadChat = 0; this.chatMode = 'everyone'; this.whitelistItems = [];
         this.showLobbyUI();
         setTimeout(() => this.loadRoomsList(), 300);
     }
