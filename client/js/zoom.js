@@ -630,7 +630,17 @@ class ZoomManager {
         const pc = new RTCPeerConnection(this.iceServers);
         this.peers.set(socketId, pc);
 
-        if (this.localStream) this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
+        if (this.localStream) {
+            this.localStream.getTracks().forEach(t => {
+                if (t.kind === 'video' && this.isScreenSharing && this.screenStream) {
+                    // Send screen video to this new peer instead of camera
+                    const screenVideo = this.screenStream.getVideoTracks()[0];
+                    pc.addTrack(screenVideo || t, this.localStream);
+                } else {
+                    pc.addTrack(t, this.localStream);
+                }
+            });
+        }
 
         pc.onicecandidate = e => {
             if (e.candidate) this.socket.emit('zoom:ice-candidate', { targetSocketId: socketId, candidate: e.candidate });
