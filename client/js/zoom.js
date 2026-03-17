@@ -24,10 +24,11 @@ class ZoomManager {
         this.userName = userName;
         this.userId = userId;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const serverUrl = window.location.origin;
 
-        this.socket = io(serverUrl);
+        this.socket = io(serverUrl, {
+            transports: ['websocket', 'polling']
+        });
 
         this.socket.on('connect', () => {
             console.log('Socket connected:', this.socket.id);
