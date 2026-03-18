@@ -34,6 +34,7 @@ class ZoomManager {
         // Raised hands
         this.raisedHands = new Map();  // socketId -> name
         this.myHandRaised = false;
+        this.peerVideoTrackCount = new Map(); // socketId -> how many video tracks received
         this.emojisEnabled = true;
         this._waitingCount = 0;
 
@@ -67,14 +68,40 @@ class ZoomManager {
         if (this.socket) { this.socket.disconnect(); this.socket = null; }
         this.setStatus('מתחבר...');
 
-        this.socket = io(window.location.origin, { transports: ['polling', 'websocket'], reconnectionAttempts: 5 });
+        this.socket = io(window.location.origin, {
+            transports: ['polling', 'websocket'],
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000
+        });
 
         this.socket.on('connect', () => {
             this.setStatus('מחובר');
             this.loadRoomsList();
+            // Auto-rejoin room after reconnect
+            if (this.currentRoomId && this.userName) {
+                const roomId = this.mainRoomId || this.currentRoomId;
+                this._resetForBreakout();
+                this.inBreakout = false;
+                this.currentRoomId = roomId;
+                this.mainRoomId = roomId;
+                this.startLocalStream().then(() => {
+                    this.socket.emit('zoom:request-join', {
+                        roomId, userName: this.userName, userId: this.userId, userRole: this.userRole
+                    });
+                }).catch(() => {});
+            }
         });
         this.socket.on('connect_error', e => this.setStatus('שגיאת חיבור: ' + e.message));
-        this.socket.on('disconnect', () => this.setStatus('מנותק'));
+        this.socket.on('disconnect', reason => {
+            this.setStatus('מנותק');
+            // Clean up peer connections on disconnect to avoid stale state
+            this.peers.forEach((_, sid) => this.closePeer(sid));
+            this.peers.clear();
+            const grid = document.getElementById('zoom-video-grid');
+            if (grid) grid.innerHTML = '';
+            if (this.localStream) { this.addLocalTile(); }
+        });
 
         // Core
         this.socket.on('zoom:rooms-list',            d => this.renderRoomsList(d));
@@ -253,8 +280,10 @@ class ZoomManager {
         this._updateEmojiBtn();
         this.updateRoomLink(this.mainRoomId || roomId);
         for (const u of existingUsers) {
-            this.addRemoteTilePlaceholder(u.socketId, u.name);
-            await this.createOffer(u.socketId, u.name);
+            try {
+                this.addRemoteTilePlaceholder(u.socketId, u.name);
+                await this.createOffer(u.socketId, u.name);
+            } catch(e) { console.warn('offer to', u.name, 'failed:', e); }
         }
     }
 
@@ -266,7 +295,12 @@ class ZoomManager {
         this.closePeer(socketId);
         const tile = document.getElementById('tile-' + socketId);
         if (tile) tile.remove();
-        if (this.screenShareSocketId === socketId) this.clearScreenShareDom(socketId);
+        if (this.screenShareSocketId === socketId) {
+            this.onRemoteScreenShareStopped({ socketId });
+        } else {
+            const screenTile = document.getElementById('screenshare-' + socketId);
+            if (screenTile) { this.setDominantTile('screenshare-' + socketId, false); screenTile.remove(); }
+        }
         this.updateCount();
     }
 
@@ -660,54 +694,95 @@ class ZoomManager {
             this._showToast('טיפ: סמן "שתף שמע מערכת" בחלון הדפדפן לשמע שיתוף מסך');
             this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: { echoCancellation: false, noiseSuppression: false } });
             const videoTrack = this.screenStream.getVideoTracks()[0];
-            const audioTrack = this.screenStream.getAudioTracks()[0] || null;
-            const replacePromises = [];
-            this.peers.forEach(pc => {
-                const vs = pc.getSenders().find(s => s.track?.kind === 'video');
-                if (vs && videoTrack) replacePromises.push(vs.replaceTrack(videoTrack));
-                if (audioTrack) { const as = pc.getSenders().find(s => s.track?.kind === 'audio'); if (as) replacePromises.push(as.replaceTrack(audioTrack)); }
-            });
-            await Promise.all(replacePromises);
-            const lv = document.getElementById('local-video');
-            if (lv) { lv.srcObject = this.screenStream; lv.style.objectFit = 'contain'; }
+            // Add screen share as an ADDITIONAL video track (don't replace camera)
+            for (const [sid, pc] of this.peers.entries()) {
+                pc.addTrack(videoTrack, this.screenStream);
+                // Renegotiate so remote side gets the new track
+                try {
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    this.socket.emit('zoom:offer', { targetSocketId: sid, offer: pc.localDescription, fromName: this.userName });
+                } catch(e) {}
+            }
+            // Show screen share locally as a separate dominant tile (camera tile stays visible in strip)
+            this._addLocalScreenShareTile(this.screenStream);
             this.isScreenSharing = true;
             this.socket.emit('zoom:screen-share-started', { roomId: this.currentRoomId });
             const btn = document.getElementById('zoom-screen-btn');
             if (btn) { btn.classList.add('active'); btn.title = 'עצור שיתוף'; }
-            this.setDominantTile('tile-local', true);
             videoTrack.onended = () => this.stopScreenShare();
         } catch(e) { if (e.name !== 'NotAllowedError') this._showToast('שגיאה בשיתוף מסך: ' + e.message); }
     }
 
     stopScreenShare() {
         if (!this.isScreenSharing) return;
-        const camTrack = this.localStream?.getVideoTracks()[0];
-        const micTrack = this.localStream?.getAudioTracks()[0];
-        const hadScreenAudio = this.screenStream?.getAudioTracks().length > 0;
+        const screenVideoTrack = this.screenStream?.getVideoTracks()[0];
+        // Remove screen share sender from all peers
         this.peers.forEach(pc => {
-            const vs = pc.getSenders().find(s => s.track?.kind === 'video');
-            if (vs && camTrack) vs.replaceTrack(camTrack);
-            if (hadScreenAudio && micTrack) { const as = pc.getSenders().find(s => s.track?.kind === 'audio'); if (as) as.replaceTrack(micTrack); }
+            const sender = pc.getSenders().find(s => s.track === screenVideoTrack);
+            if (sender) try { pc.removeTrack(sender); } catch(e) {}
         });
-        const lv = document.getElementById('local-video');
-        if (lv && this.localStream) { lv.srcObject = this.localStream; lv.style.objectFit = ''; }
+        this._removeLocalScreenShareTile();
         this.screenStream?.getTracks().forEach(t => t.stop());
         this.screenStream = null;
         this.isScreenSharing = false;
         this.socket.emit('zoom:screen-share-stopped', { roomId: this.currentRoomId });
         const btn = document.getElementById('zoom-screen-btn');
         if (btn) { btn.classList.remove('active'); btn.title = 'שתף מסך'; }
-        this.setDominantTile('tile-local', false);
+    }
+
+    _addLocalScreenShareTile(stream) {
+        const grid = document.getElementById('zoom-video-grid');
+        if (!grid) return;
+        let tile = document.getElementById('screenshare-local');
+        if (!tile) {
+            tile = this._makeTile('screenshare-local', 'screen-share-tile', 'שיתוף המסך שלך');
+            grid.appendChild(tile);
+        }
+        let vid = tile.querySelector('video');
+        if (!vid) {
+            vid = document.createElement('video');
+            vid.autoplay = true; vid.playsInline = true; vid.muted = true;
+            tile.insertBefore(vid, tile.firstChild);
+        }
+        vid.srcObject = stream;
+        vid.play().catch(() => {});
+        this.setDominantTile('screenshare-local', true);
+    }
+
+    _removeLocalScreenShareTile() {
+        const tile = document.getElementById('screenshare-local');
+        if (tile) { this.setDominantTile('screenshare-local', false); tile.remove(); }
+    }
+
+    _attachRemoteScreenShare(socketId, stream) {
+        const tileId = 'screenshare-' + socketId;
+        let tile = document.getElementById(tileId);
+        if (!tile) {
+            tile = this._makeTile(tileId, 'screen-share-tile', 'שיתוף מסך');
+            document.getElementById('zoom-video-grid')?.appendChild(tile);
+        }
+        let vid = tile.querySelector('video');
+        if (!vid) {
+            vid = document.createElement('video');
+            vid.autoplay = true; vid.playsInline = true;
+            tile.insertBefore(vid, tile.firstChild);
+        }
+        vid.srcObject = stream;
+        vid.play().catch(() => {});
+        this.setDominantTile(tileId, true);
     }
 
     onRemoteScreenShareStarted({ socketId }) {
         this.screenShareSocketId = socketId;
-        this.setDominantTile('tile-' + socketId, true);
+        // The screen share tile will be created when the second video track arrives via ontrack
     }
 
     onRemoteScreenShareStopped({ socketId }) {
         this.screenShareSocketId = null;
-        this.setDominantTile('tile-' + socketId, false);
+        const tileId = 'screenshare-' + socketId;
+        const tile = document.getElementById(tileId);
+        if (tile) { this.setDominantTile(tileId, false); tile.remove(); }
     }
 
     setDominantTile(tileId, dominant) {
@@ -759,39 +834,68 @@ class ZoomManager {
         const pc = new RTCPeerConnection(this.iceServers);
         this.peers.set(socketId, pc);
         if (this.localStream) {
-            this.localStream.getTracks().forEach(t => {
-                if (t.kind === 'video' && this.isScreenSharing && this.screenStream) {
-                    const screenVideo = this.screenStream.getVideoTracks()[0];
-                    pc.addTrack(screenVideo || t, this.localStream);
-                } else {
-                    pc.addTrack(t, this.localStream);
-                }
-            });
+            this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
+        }
+        // If screen sharing is active, also add the screen track as a second video track
+        if (this.isScreenSharing && this.screenStream) {
+            const screenVideo = this.screenStream.getVideoTracks()[0];
+            if (screenVideo) pc.addTrack(screenVideo, this.screenStream);
         }
         pc.onicecandidate = e => { if (e.candidate) this.socket.emit('zoom:ice-candidate', { targetSocketId: socketId, candidate: e.candidate }); };
-        pc.ontrack = e => { if (e.streams && e.streams[0]) this.attachRemoteStream(socketId, userName, e.streams[0]); };
-        pc.onconnectionstatechange = () => { if (['failed','disconnected','closed'].includes(pc.connectionState)) this.onUserLeft({ socketId }); };
+        pc.ontrack = e => {
+            if (!e.streams || !e.streams[0]) return;
+            if (e.track.kind === 'video') {
+                const count = this.peerVideoTrackCount.get(socketId) || 0;
+                this.peerVideoTrackCount.set(socketId, count + 1);
+                if (count > 0) {
+                    // Second video track = screen share stream
+                    this._attachRemoteScreenShare(socketId, e.streams[0]);
+                    return;
+                }
+            }
+            this.attachRemoteStream(socketId, userName, e.streams[0]);
+        };
+        pc.onconnectionstatechange = () => {
+            // 'disconnected' is transient — wait before acting. Only act on 'failed' or 'closed'.
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                this.onUserLeft({ socketId });
+            }
+        };
         return pc;
     }
 
     async createOffer(targetSocketId, targetName) {
-        const pc = this.createPeerConnection(targetSocketId, targetName);
-        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-        await pc.setLocalDescription(offer);
-        this.socket.emit('zoom:offer', { targetSocketId, offer: pc.localDescription, fromName: this.userName });
+        try {
+            const pc = this.createPeerConnection(targetSocketId, targetName);
+            const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+            await pc.setLocalDescription(offer);
+            this.socket.emit('zoom:offer', { targetSocketId, offer: pc.localDescription, fromName: this.userName });
+        } catch(e) { console.warn('createOffer failed:', e); }
     }
 
     async onOffer({ fromSocketId, fromName, offer }) {
-        const pc = this.createPeerConnection(fromSocketId, fromName);
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        this.socket.emit('zoom:answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
+        try {
+            let pc = this.peers.get(fromSocketId);
+            if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
+            // Handle glare: if we already sent an offer, rollback before accepting theirs
+            if (pc.signalingState === 'have-local-offer') {
+                await pc.setLocalDescription({ type: 'rollback' });
+            }
+            if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-remote-offer') return;
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            this.socket.emit('zoom:answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
+        } catch(e) { console.warn('onOffer failed:', e); }
     }
 
     async onAnswer({ fromSocketId, answer }) {
-        const pc = this.peers.get(fromSocketId);
-        if (pc && pc.signalingState !== 'stable') await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        try {
+            const pc = this.peers.get(fromSocketId);
+            if (pc && pc.signalingState === 'have-local-offer') {
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+            }
+        } catch(e) { console.warn('onAnswer failed:', e); }
     }
 
     async onIceCandidate({ fromSocketId, candidate }) {
@@ -802,6 +906,7 @@ class ZoomManager {
     closePeer(socketId) {
         const pc = this.peers.get(socketId);
         if (pc) { pc.close(); this.peers.delete(socketId); }
+        this.peerVideoTrackCount.delete(socketId);
         this.stopAudioAnalyzer(socketId);
     }
 
@@ -968,7 +1073,13 @@ class ZoomManager {
     }
 
     leaveRoom() {
-        if (this.currentRoomId) this.socket.emit('zoom:leave-room', { roomId: this.currentRoomId });
+        const isGuest = this.userRole === 'guest';
+        const roomId = this.currentRoomId;
+        if (roomId) this.socket.emit('zoom:leave-room', { roomId });
+        if (isGuest && roomId) {
+            this._showGuestEndedScreen('עזבת את השיחה', 'עזבת את השיחה');
+            return;
+        }
         this.fullReset();
     }
 
@@ -985,6 +1096,7 @@ class ZoomManager {
         this.unreadChat = 0; this.chatMode = 'everyone'; this.whitelistItems = [];
         this.roomPermissions = { allowMic: true, allowCamera: true, allowScreenShare: true };
         this.breakoutRooms = []; this.breakoutParticipants = []; this.inBreakout = false;
+        this.peerVideoTrackCount.clear();
         this.polls.clear(); this.qaEnabled = false; this.qaQuestions = [];
         if (this.timerInterval) { clearInterval(this.timerInterval); this.timerInterval = null; }
         this.timerEndTime = null;
@@ -1210,6 +1322,7 @@ class ZoomManager {
     _resetForBreakout() {
         this.peers.forEach((_, sid) => this.closePeer(sid));
         this.peers.clear();
+        this.peerVideoTrackCount.clear();
         this.audioAnalyzers.forEach((_, id) => this.stopAudioAnalyzer(id));
         if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null; }
         const grid = document.getElementById('zoom-video-grid');
@@ -1851,7 +1964,7 @@ class ZoomManager {
         const input = document.getElementById('breakout-broadcast-input');
         const msg = input?.value.trim();
         if (!msg) return;
-        this.socket.emit('zoom:broadcast-to-breakout', { roomId: this.currentRoomId || this.mainRoomId, message: msg });
+        this.socket.emit('zoom:broadcast-to-breakout', { roomId: this.mainRoomId || this.currentRoomId, message: msg });
         if (input) input.value = '';
     }
 
@@ -1901,7 +2014,7 @@ class ZoomManager {
     }
 
     // ── Guest Ended Screen ────────────────────────────────────────────────────
-    _showGuestEndedScreen(msg) {
+    _showGuestEndedScreen(msg, title) {
         this.fullReset();
         let overlay = document.getElementById('guest-ended-overlay');
         if (!overlay) {
@@ -1913,7 +2026,7 @@ class ZoomManager {
         let count = 5;
         overlay.innerHTML = `
             <i class="fas fa-video-slash" style="font-size:4rem;color:#ef4444;margin-bottom:1rem;"></i>
-            <h2 style="margin-bottom:0.5rem;">השיחה הסתיימה</h2>
+            <h2 style="margin-bottom:0.5rem;">${title || 'השיחה הסתיימה'}</h2>
             <p style="color:#94a3b8;">${msg}</p>
             <p id="guest-redirect-count" style="color:#64748b;margin-top:1rem;">מועבר לדף הבית בעוד ${count}...</p>`;
         const interval = setInterval(() => {

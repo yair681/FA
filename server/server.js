@@ -96,7 +96,7 @@ function admitUser(targetSocket, room, roomId, userName, userId, userRole) {
     if (sid !== targetSocket.id) existingUsers.push({ socketId: sid, name: u.name, isCoHost: u.isCoHost, isHost: sid === room.hostSocketId });
   });
   targetSocket.emit('zoom:room-joined', {
-    roomId, roomName: room.name, existingUsers, isHost: false,
+    roomId, roomName: room.name, existingUsers, isHost: targetSocket.id === room.hostSocketId,
     chatMode: room.chatMode || 'everyone',
     permissions: room.permissions || { allowMic: true, allowCamera: true, allowScreenShare: true },
     settings: room.settings || {}, emojisEnabled: room.emojisEnabled !== false
@@ -266,6 +266,36 @@ io.on('connection', (socket) => {
         }
       } catch { }
       socket.emit('zoom:error', { message: 'החדר לא נמצא' }); return;
+    }
+
+    // Original host reconnecting after crash — restore host status
+    if (userId && room.hostUserId && String(userId) === String(room.hostUserId) && !room.users.has(socket.id)) {
+      const prevHostSid = room.hostSocketId;
+      room.hostSocketId = socket.id;
+      // Demote the temporary host back to regular participant
+      if (prevHostSid && prevHostSid !== socket.id && room.users.has(prevHostSid)) {
+        room.users.get(prevHostSid).isCoHost = false;
+        io.to(prevHostSid).emit('zoom:role-changed', { role: 'participant' });
+      }
+    }
+
+    // User already in room (e.g. host/cohost returning from breakout) — resend room-joined with correct role
+    if (room.users.has(socket.id)) {
+      const isHostUser = socket.id === room.hostSocketId;
+      const u = room.users.get(socket.id);
+      const existingUsers = [];
+      room.users.forEach((ru, sid) => {
+        if (sid !== socket.id) existingUsers.push({ socketId: sid, name: ru.name, isCoHost: ru.isCoHost, isHost: sid === room.hostSocketId });
+      });
+      socket.join(roomId);
+      socket.emit('zoom:room-joined', {
+        roomId, roomName: room.name, existingUsers, isHost: isHostUser,
+        chatMode: room.chatMode || 'everyone',
+        permissions: room.permissions || { allowMic: true, allowCamera: true, allowScreenShare: true },
+        settings: room.settings || {}, emojisEnabled: room.emojisEnabled !== false
+      });
+      io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
+      broadcastRooms(); return;
     }
 
     if (room.settings && room.settings.requireAdminApproval) {
