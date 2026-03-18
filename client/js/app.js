@@ -53,14 +53,14 @@ async function onAuthSuccess() {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function loadDashboard() {
     const isAdmin = window.authManager?.isAdmin();
-    // Active rooms section only for admins
     const activeSection = document.getElementById('active-rooms-section');
     if (activeSection) activeSection.style.display = isAdmin ? 'block' : 'none';
-    if (isAdmin) window.zoomManager.loadRoomsList();
-
-    apiFetch('/api/admin/settings').then(s => {
-        window.zoomManager.applyCreatePermission({ locked: s.lockMeetingCreation });
-    }).catch(() => {});
+    if (isAdmin) {
+        window.zoomManager.loadRoomsList();
+        apiFetch('/api/admin/settings').then(s => {
+            window.zoomManager.applyCreatePermission({ locked: s.lockMeetingCreation });
+        }).catch(() => {});
+    }
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
@@ -414,9 +414,8 @@ function showToast(msg) {
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    if (detectRoute()) return;
-
     await window.authManager.init();
+    if (detectRoute()) return;
 
     if (window.authManager.isLoggedIn()) {
         await onAuthSuccess();

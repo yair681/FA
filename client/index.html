@@ -109,7 +109,10 @@
       </div>
 
       <div class="zoom-call-body">
+        <div class="zoom-video-area">
         <div id="zoom-video-grid" class="zoom-video-grid"></div>
+        <div id="zoom-video-strip" class="zoom-video-strip" style="display:none"></div>
+      </div>
 
         <!-- Participants panel -->
         <div id="zoom-panel-participants" class="zoom-side-panel" style="display:none">
@@ -135,10 +138,6 @@
             <span>צ'אט</span>
             <button onclick="zoomManager.togglePanel('chat')"><i class="fas fa-times"></i></button>
           </div>
-          <select id="zoom-chat-mode-select" onchange="zoomManager.setChatMode(this.value)" class="form-control" style="margin:0.5rem;font-size:0.8rem;">
-            <option value="everyone">כולם יכולים לכתוב</option>
-            <option value="host-only">מארח בלבד</option>
-          </select>
           <div id="zoom-chat-messages" class="zoom-chat-messages"></div>
           <div class="zoom-chat-input-row">
             <input id="zoom-chat-input" class="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter')zoomManager.sendChat()">
@@ -157,6 +156,13 @@
             <label class="perm-row"><input type="checkbox" id="zoom-perm-mic" onchange="zoomManager.updateRoomPermission('allowMic',this.checked)" checked> מיקרופון</label>
             <label class="perm-row"><input type="checkbox" id="zoom-perm-camera" onchange="zoomManager.updateRoomPermission('allowCamera',this.checked)" checked> מצלמה</label>
             <label class="perm-row"><input type="checkbox" id="zoom-perm-screen" onchange="zoomManager.updateRoomPermission('allowScreenShare',this.checked)" checked> שיתוף מסך</label>
+          </div>
+          <div class="manage-section">
+            <h4>שליטה בצ'אט</h4>
+            <select id="zoom-chat-mode-select" onchange="zoomManager.setChatMode(this.value)" class="form-control" style="font-size:0.85rem;">
+              <option value="everyone">כולם יכולים לכתוב</option>
+              <option value="host-only">מארח בלבד</option>
+            </select>
           </div>
           <div class="manage-section">
             <h4>הגדרות כניסה</h4>
@@ -259,6 +265,10 @@
         </button>
         <button id="zoom-screen-btn" class="ctrl-btn" onclick="zoomManager.toggleScreenShare()" title="שתף מסך">
           <i class="fas fa-desktop"></i>
+        </button>
+        <button id="zoom-bg-btn" class="ctrl-btn" onclick="zoomManager.openBgPicker()" title="רקע וירטואלי">
+          <i class="fas fa-image"></i>
+          <span class="ctrl-label">רקע</span>
         </button>
 
         <div class="ctrl-separator"></div>
@@ -460,6 +470,54 @@
   </div>
 </div>
 
+<!-- Virtual background picker -->
+<div id="modal-bg-picker" class="modal" style="display:none">
+  <div class="modal-content" style="max-width:520px;">
+    <div class="modal-header">
+      <h3><i class="fas fa-image"></i> רקע וירטואלי</h3>
+      <button onclick="closeModal('modal-bg-picker')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="modal-body">
+      <div class="bg-options-grid">
+        <div class="bg-option selected" data-bg="none" onclick="zoomManager.setVirtualBackground('none')">
+          <div class="bg-preview" style="background:var(--dark3);display:flex;align-items:center;justify-content:center;"><i class="fas fa-ban" style="color:var(--gray);font-size:1.5rem;"></i></div>
+          <span>ללא</span>
+        </div>
+        <div class="bg-option" data-bg="blur" onclick="zoomManager.setVirtualBackground('blur')">
+          <div class="bg-preview" style="background:linear-gradient(135deg,#334155,#64748b);display:flex;align-items:center;justify-content:center;"><i class="fas fa-circle-notch" style="color:#fff;font-size:1.5rem;"></i></div>
+          <span>טשטוש</span>
+        </div>
+        <div class="bg-option" data-bg="night" onclick="zoomManager.setVirtualBackground('preset','night')">
+          <div class="bg-preview" style="background:#0a1628;display:flex;align-items:center;justify-content:center;"><i class="fas fa-moon" style="color:#aab;font-size:1.2rem;"></i></div>
+          <span>לילה</span>
+        </div>
+        <div class="bg-option" data-bg="forest" onclick="zoomManager.setVirtualBackground('preset','forest')">
+          <div class="bg-preview" style="background:#0d2818;display:flex;align-items:center;justify-content:center;"><i class="fas fa-tree" style="color:#4ade80;font-size:1.2rem;"></i></div>
+          <span>יער</span>
+        </div>
+        <div class="bg-option" data-bg="galaxy" onclick="zoomManager.setVirtualBackground('preset','galaxy')">
+          <div class="bg-preview" style="background:linear-gradient(135deg,#1a0533,#2d1b69);display:flex;align-items:center;justify-content:center;"><i class="fas fa-star" style="color:#c084fc;font-size:1.2rem;"></i></div>
+          <span>גלקסיה</span>
+        </div>
+        <div class="bg-option" data-bg="sea" onclick="zoomManager.setVirtualBackground('preset','sea')">
+          <div class="bg-preview" style="background:linear-gradient(135deg,#1a3a5c,#0a7575);display:flex;align-items:center;justify-content:center;"><i class="fas fa-water" style="color:#38bdf8;font-size:1.2rem;"></i></div>
+          <span>ים</span>
+        </div>
+        <div class="bg-option" data-bg="coffee" onclick="zoomManager.setVirtualBackground('preset','coffee')">
+          <div class="bg-preview" style="background:linear-gradient(135deg,#3a1a0a,#6b3a1f);display:flex;align-items:center;justify-content:center;"><i class="fas fa-coffee" style="color:#d97706;font-size:1.2rem;"></i></div>
+          <span>קפה</span>
+        </div>
+        <div class="bg-option" data-bg="office" onclick="zoomManager.setVirtualBackground('preset','office')">
+          <div class="bg-preview" style="background:linear-gradient(135deg,#1e293b,#334155);display:flex;align-items:center;justify-content:center;"><i class="fas fa-building" style="color:#94a3b8;font-size:1.2rem;"></i></div>
+          <span>משרד</span>
+        </div>
+      </div>
+      <p style="font-size:0.78rem;color:var(--gray);margin-top:14px;"><i class="fas fa-info-circle"></i> הרקע הוירטואלי דורש מצלמה פעילה. ייתכן עיכוב בהפעלה ראשונה.</p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="/js/auth.js"></script>
 <script src="/js/meetings.js"></script>

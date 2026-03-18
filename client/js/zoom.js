@@ -23,12 +23,23 @@ class ZoomManager {
         this.roomPermissions = { allowMic: true, allowCamera: true, allowScreenShare: true };
         // New state
         this.breakoutRooms = [];
+        this.breakoutParticipants = [];
         this.inBreakout = false;
-        this.polls = new Map();  // pollId => {id, question, options:[], counts:[], totalVotes, closed}
+        this.polls = new Map();
         this.qaEnabled = false;
         this.qaQuestions = [];
         this.timerInterval = null;
         this.timerEndTime = null;
+
+        // Virtual background
+        this.virtualBgType = 'none';   // 'none' | 'blur' | 'preset'
+        this.virtualBgPreset = null;   // 'night' | 'forest' | 'galaxy' | 'sea' | 'coffee' | 'office'
+        this.virtualBgCanvas = null;
+        this.virtualBgCtx = null;
+        this.virtualBgStream = null;
+        this.selfieSegmentation = null;
+        this._vbVideoEl = null;
+        this._vbAnimId = null;
 
         this.iceServers = {
             iceServers: [
@@ -113,6 +124,17 @@ class ZoomManager {
         this.socket.on('zoom:timer-state',     d => { if (d.active) this.onTimerStarted({ endTime: d.endTime, seconds: Math.round((d.endTime - Date.now()) / 1000) }); });
     }
 
+    // ── Wait for socket connection ────────────────────────────────────────────
+    _waitForConnection() {
+        return new Promise((resolve, reject) => {
+            if (this.socket && this.socket.connected) { resolve(); return; }
+            if (!this.socket) { reject(new Error('אין חיבור')); return; }
+            const timeout = setTimeout(() => reject(new Error('תם הזמן לחיבור')), 12000);
+            this.socket.once('connect', () => { clearTimeout(timeout); resolve(); });
+            this.socket.once('connect_error', e => { clearTimeout(timeout); reject(e); });
+        });
+    }
+
     // ── Status / Permission ───────────────────────────────────────────────────
     setStatus(msg) {
         const el = document.getElementById('zoom-connection-status');
@@ -154,7 +176,7 @@ class ZoomManager {
     // ── Create / Join ─────────────────────────────────────────────────────────
     // Used when you own the room (host = true) or want to join existing
     async joinRoom(roomId, roomName, isHost, meetingType) {
-        if (!this.socket || !this.socket.connected) { this._showToast('לא מחובר. נסה שוב.'); return; }
+        try { await this._waitForConnection(); } catch(e) { this._showToast('לא מחובר לשרת. נסה שוב.'); return; }
         await this.startLocalStream();
         this.isHost = !!isHost;
         if (isHost) {
@@ -164,12 +186,12 @@ class ZoomManager {
                 meetingType: meetingType || 'instant'
             });
         } else {
-            this.socket.emit('zoom:request-join', { roomId, userName: this.userName, userId: this.userId });
+            this.socket.emit('zoom:request-join', { roomId, userName: this.userName, userId: this.userId, userRole: this.userRole });
         }
     }
 
     async requestJoin(roomId) {
-        if (!this.socket || !this.socket.connected) { this._showToast('לא מחובר. נסה שוב.'); return; }
+        try { await this._waitForConnection(); } catch(e) { this._showToast('לא מחובר לשרת. נסה שוב.'); return; }
         await this.startLocalStream();
         this.socket.emit('zoom:request-join', { roomId, userName: this.userName, userId: this.userId, userRole: this.userRole });
     }
@@ -629,14 +651,38 @@ class ZoomManager {
 
     setDominantTile(tileId, dominant) {
         const grid = document.getElementById('zoom-video-grid');
-        document.querySelectorAll('.video-tile').forEach(t => t.classList.remove('dominant'));
+        const strip = document.getElementById('zoom-video-strip');
+        if (!grid) return;
+
         if (dominant) {
-            if (grid) grid.classList.add('has-screen-share');
-            const t = document.getElementById(tileId);
-            if (t) t.classList.add('dominant');
+            grid.classList.add('has-screen-share');
+            if (strip) strip.style.display = 'flex';
+
+            // Move all non-dominant tiles to strip
+            const dominantTile = document.getElementById(tileId);
+            document.querySelectorAll('.video-tile').forEach(t => t.classList.remove('dominant'));
+            if (dominantTile) { dominantTile.classList.add('dominant'); grid.appendChild(dominantTile); }
+
+            document.querySelectorAll('.video-tile:not(.dominant)').forEach(t => {
+                if (strip) strip.appendChild(t);
+            });
         } else {
-            if (grid) grid.classList.remove('has-screen-share');
+            grid.classList.remove('has-screen-share');
+            document.querySelectorAll('.video-tile').forEach(t => t.classList.remove('dominant'));
+
+            // Move all tiles back from strip to grid
+            if (strip) {
+                Array.from(strip.querySelectorAll('.video-tile')).forEach(t => grid.appendChild(t));
+                strip.style.display = 'none';
+            }
         }
+    }
+
+    // Return the right container for new tiles (strip when screen sharing, grid otherwise)
+    _getTileContainer() {
+        const strip = document.getElementById('zoom-video-strip');
+        if (strip && strip.style.display !== 'none') return strip;
+        return document.getElementById('zoom-video-grid');
     }
 
     clearScreenShareDom(socketId) {
@@ -770,7 +816,7 @@ class ZoomManager {
 
     // ── Video Tiles ───────────────────────────────────────────────────────────
     addLocalTile() {
-        const grid = document.getElementById('zoom-video-grid');
+        const grid = this._getTileContainer();
         if (!grid || document.getElementById('tile-local')) return;
         const tile = this._makeTile('tile-local', 'local-tile', this.userName + ' (אתה)');
         const vid = document.createElement('video');
@@ -782,7 +828,7 @@ class ZoomManager {
     }
 
     addRemoteTilePlaceholder(socketId, name) {
-        const grid = document.getElementById('zoom-video-grid');
+        const grid = this._getTileContainer();
         if (!grid || document.getElementById('tile-' + socketId)) return;
         const tile = this._makeTile('tile-' + socketId, '', name);
         const avatar = document.createElement('div');
@@ -794,7 +840,7 @@ class ZoomManager {
 
     attachRemoteStream(socketId, name, stream) {
         let tile = document.getElementById('tile-' + socketId);
-        if (!tile) { tile = this._makeTile('tile-' + socketId, '', name); document.getElementById('zoom-video-grid')?.appendChild(tile); }
+        if (!tile) { tile = this._makeTile('tile-' + socketId, '', name); this._getTileContainer()?.appendChild(tile); }
         const avatar = tile.querySelector('.video-avatar');
         if (avatar) avatar.remove();
         let vid = document.getElementById('video-' + socketId);
@@ -877,10 +923,13 @@ class ZoomManager {
         this.screenShareSocketId = null;
         this.unreadChat = 0; this.chatMode = 'everyone'; this.whitelistItems = [];
         this.roomPermissions = { allowMic: true, allowCamera: true, allowScreenShare: true };
-        this.breakoutRooms = []; this.inBreakout = false;
+        this.breakoutRooms = []; this.breakoutParticipants = []; this.inBreakout = false;
         this.polls.clear(); this.qaEnabled = false; this.qaQuestions = [];
         if (this.timerInterval) { clearInterval(this.timerInterval); this.timerInterval = null; }
         this.timerEndTime = null;
+        this._stopVBProcessing();
+        const overlay = document.getElementById('breakout-timer-overlay');
+        if (overlay) overlay.style.display = 'none';
         ['zoom-audio-btn','zoom-video-btn','zoom-screen-btn'].forEach(id => {
             const btn = document.getElementById(id); if (btn) btn.disabled = false;
         });
@@ -897,10 +946,9 @@ class ZoomManager {
     }
 
     onBreakoutCreated({ rooms, participants }) {
-        // rooms = [{id, name, participants:[socketIds]}]
-        // enrich rooms with member name info from participants list
         const pidMap = {};
         (participants || []).forEach(p => { pidMap[p.socketId] = p.name; });
+        this.breakoutParticipants = (participants || []).filter(p => p.socketId !== this.socket?.id);
         this.breakoutRooms = rooms.map(r => ({
             id: r.id, name: r.name,
             members: (r.participants || []).map(sid => ({ socketId: sid, name: pidMap[sid] || sid }))
@@ -908,11 +956,13 @@ class ZoomManager {
         this.renderBreakoutAssign(this.breakoutRooms);
     }
 
-    onBreakoutUpdated({ rooms }) {
+    onBreakoutUpdated({ rooms, participants }) {
+        // If server sends updated participants, update our list
+        if (participants && participants.length) {
+            this.breakoutParticipants = participants.filter(p => p.socketId !== this.socket?.id);
+        }
         const pidMap = {};
-        document.querySelectorAll('.breakout-member-chip').forEach(el => {
-            if (el.dataset.socketid) pidMap[el.dataset.socketid] = el.textContent.trim();
-        });
+        this.breakoutParticipants.forEach(p => { pidMap[p.socketId] = p.name; });
         this.breakoutRooms = rooms.map(r => ({
             id: r.id, name: r.name,
             members: (r.participants || []).map(sid => ({ socketId: sid, name: pidMap[sid] || sid }))
@@ -923,17 +973,34 @@ class ZoomManager {
     renderBreakoutAssign(rooms) {
         const container = document.getElementById('breakout-assign-area');
         if (!container) return;
+
+        // Determine unassigned participants
+        const assignedSids = new Set();
+        rooms.forEach(r => (r.members || []).forEach(m => assignedSids.add(m.socketId)));
+        const unassigned = (this.breakoutParticipants || []).filter(p => !assignedSids.has(p.socketId));
+
+        const chip = (m, fromRoomId) => `
+            <div class="breakout-member-chip" draggable="true" data-socketid="${m.socketId}"
+                 ondragstart="event.dataTransfer.setData('socketId','${m.socketId}');event.dataTransfer.setData('name','${m.name}')">
+                <i class="fas fa-user"></i> ${m.name}
+            </div>`;
+
         container.innerHTML = `
+            ${unassigned.length ? `
+            <div style="margin-bottom:0.75rem;">
+                <div style="font-size:0.78rem;color:var(--gray);margin-bottom:4px;">לא משויכים (${unassigned.length})</div>
+                <div class="breakout-unassigned" id="br-col-unassigned"
+                     ondragover="event.preventDefault()" ondrop="zoomManager.dropToBreakout(event,'unassigned')"
+                     style="display:flex;flex-wrap:wrap;gap:4px;min-height:32px;background:var(--dark);border-radius:6px;padding:6px;border:1px dashed var(--dark3);">
+                    ${unassigned.map(m => chip(m, null)).join('')}
+                </div>
+            </div>` : ''}
             <div class="breakout-rooms-grid">
                 ${rooms.map(r => `
                     <div class="breakout-room-col" id="br-col-${r.id}" ondragover="event.preventDefault()" ondrop="zoomManager.dropToBreakout(event,'${r.id}')">
-                        <div class="breakout-room-header">${r.name}</div>
+                        <div class="breakout-room-header">${r.name} <small style="color:var(--gray)">(${(r.members||[]).length})</small></div>
                         <div class="breakout-room-members" id="br-members-${r.id}">
-                            ${(r.members || []).map(m => `
-                                <div class="breakout-member-chip" draggable="true" data-socketid="${m.socketId}"
-                                     ondragstart="event.dataTransfer.setData('socketId','${m.socketId}');event.dataTransfer.setData('name','${m.name}')">
-                                    <i class="fas fa-user"></i> ${m.name}
-                                </div>`).join('')}
+                            ${(r.members || []).map(m => chip(m, r.id)).join('')}
                         </div>
                     </div>`).join('')}
             </div>
@@ -943,18 +1010,21 @@ class ZoomManager {
                 <button class="btn btn-danger btn-sm" onclick="zoomManager.closeBreakoutRooms()"><i class="fas fa-times"></i> סגור הכל</button>
                 <div style="display:flex;align-items:center;gap:0.4rem;margin-right:auto;">
                     <label style="font-size:0.85rem;">טיימר:</label>
-                    <input type="number" id="breakout-timer-sec" min="60" max="7200" value="900" style="width:70px;" class="form-control">
-                    <span style="font-size:0.85rem;">שניות</span>
+                    <input type="number" id="breakout-timer-min" min="1" max="120" value="15" style="width:60px;" class="form-control">
+                    <span style="font-size:0.85rem;">דקות</span>
                 </div>
             </div>`;
     }
 
     dropToBreakout(event, roomId) {
         const socketId = event.dataTransfer.getData('socketId');
-        const name = event.dataTransfer.getData('name');
         if (!socketId) return;
-        // Tell server to reassign
-        this.socket.emit('zoom:assign-breakout', { roomId: this.currentRoomId, targetSocketId: socketId, brId: roomId });
+        if (roomId === 'unassigned') {
+            // Remove from all rooms (server side: assign to a virtual "unassigned" - just remove from rooms)
+            this.socket.emit('zoom:assign-breakout', { roomId: this.currentRoomId, targetSocketId: socketId, brId: '' });
+        } else {
+            this.socket.emit('zoom:assign-breakout', { roomId: this.currentRoomId, targetSocketId: socketId, brId: roomId });
+        }
     }
 
     randomAssignBreakout() {
@@ -962,12 +1032,12 @@ class ZoomManager {
     }
 
     launchBreakoutRooms() {
-        const timerSec = parseInt(document.getElementById('breakout-timer-sec')?.value) || 0;
+        const timerMin = parseInt(document.getElementById('breakout-timer-min')?.value) || 0;
         this.socket.emit('zoom:launch-breakout-rooms', { roomId: this.currentRoomId });
-        if (timerSec > 0) {
+        if (timerMin > 0) {
             setTimeout(() => {
-                this.socket.emit('zoom:set-breakout-timer', { roomId: this.currentRoomId, seconds: timerSec });
-            }, 500);
+                this.socket.emit('zoom:set-breakout-timer', { roomId: this.currentRoomId, seconds: timerMin * 60 });
+            }, 600);
         }
         this._showToast('חדרי הפרצת הושקו!');
     }
@@ -1005,19 +1075,46 @@ class ZoomManager {
     }
 
     onBreakoutTimerStarted({ seconds, endsAt }) {
-        let remaining = seconds;
+        const endAt = endsAt || (Date.now() + seconds * 1000);
+        this._showBreakoutTimerOverlay();
         const tick = () => {
+            const remaining = Math.max(0, Math.round((endAt - Date.now()) / 1000));
+            const m = Math.floor(remaining / 60);
+            const s = remaining % 60;
+            const timeStr = `${m}:${s.toString().padStart(2,'0')}`;
+
+            // Update plugin panel display
             const el = document.getElementById('breakout-timer-display');
-            if (el) {
-                const m = Math.floor(remaining / 60);
-                const s = remaining % 60;
-                el.textContent = `נותר זמן: ${m}:${s.toString().padStart(2,'0')}`;
+            if (el) el.textContent = `נותר: ${timeStr}`;
+
+            // Update overlay (for participants in breakout rooms)
+            const overlay = document.getElementById('breakout-timer-overlay');
+            if (overlay) {
+                overlay.innerHTML = `<i class="fas fa-clock"></i> חדר פרצת — נותר: ${timeStr}`;
+                overlay.classList.toggle('urgent', remaining > 0 && remaining <= 30);
             }
-            if (remaining <= 0) return;
-            remaining--;
-            setTimeout(tick, 1000);
+
+            if (remaining > 0) setTimeout(tick, 1000);
+            else {
+                if (overlay) {
+                    overlay.innerHTML = '<i class="fas fa-check-circle"></i> הזמן נגמר — חוזרים לשיחה הראשית';
+                    setTimeout(() => { if (overlay) overlay.style.display = 'none'; }, 4000);
+                }
+            }
         };
         tick();
+    }
+
+    _showBreakoutTimerOverlay() {
+        let overlay = document.getElementById('breakout-timer-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'breakout-timer-overlay';
+            overlay.className = 'breakout-timer-overlay';
+            const callContainer = document.getElementById('zoom-call-container');
+            if (callContainer) callContainer.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
     }
 
     _resetForBreakout() {
@@ -1032,6 +1129,213 @@ class ZoomManager {
     closeBreakoutRooms() {
         if (!this.isHost) return;
         this.socket.emit('zoom:close-breakout-rooms', { roomId: this.currentRoomId });
+    }
+
+    // ── Virtual Background ────────────────────────────────────────────────────
+    openBgPicker() {
+        if (!this.localStream) { this._showToast('יש להיות בשיחה פעילה'); return; }
+        // Update selected state
+        document.querySelectorAll('.bg-option').forEach(el => el.classList.remove('selected'));
+        const currentKey = this.virtualBgType === 'none' ? 'none'
+            : this.virtualBgType === 'blur' ? 'blur' : this.virtualBgPreset;
+        const sel = document.querySelector(`.bg-option[data-bg="${currentKey}"]`);
+        if (sel) sel.classList.add('selected');
+        if (typeof openModal === 'function') openModal('modal-bg-picker');
+    }
+
+    async setVirtualBackground(type, preset) {
+        // Update UI
+        document.querySelectorAll('.bg-option').forEach(el => el.classList.remove('selected'));
+        const key = type === 'none' ? 'none' : type === 'blur' ? 'blur' : preset;
+        const sel = document.querySelector(`.bg-option[data-bg="${key}"]`);
+        if (sel) sel.classList.add('selected');
+
+        const wasActive = this.virtualBgType !== 'none';
+        this.virtualBgType = type;
+        this.virtualBgPreset = preset || null;
+
+        if (type === 'none') {
+            if (wasActive) this._stopVBProcessing();
+            return;
+        }
+
+        if (!this.localStream) { this._showToast('יש להפעיל מצלמה תחילה'); return; }
+
+        if (wasActive && this.virtualBgCanvas) {
+            // Already running — just change type/preset, no need to restart
+            return;
+        }
+
+        this._showToast('מפעיל רקע וירטואלי...');
+        await this._startVBProcessing();
+    }
+
+    async _startVBProcessing() {
+        if (!this.localStream) return;
+
+        // Create canvas
+        this.virtualBgCanvas = document.createElement('canvas');
+        this.virtualBgCanvas.width = 640;
+        this.virtualBgCanvas.height = 360;
+        this.virtualBgCtx = this.virtualBgCanvas.getContext('2d');
+
+        // Create video element for MediaPipe input
+        this._vbVideoEl = document.createElement('video');
+        this._vbVideoEl.srcObject = this.localStream;
+        this._vbVideoEl.autoplay = true;
+        this._vbVideoEl.muted = true;
+        this._vbVideoEl.playsInline = true;
+        await this._vbVideoEl.play().catch(() => {});
+
+        const startCapture = () => {
+            // Create virtual stream from canvas
+            this.virtualBgStream = this.virtualBgCanvas.captureStream(25);
+            const virtualTrack = this.virtualBgStream.getVideoTracks()[0];
+
+            // Replace video track in all peers
+            if (virtualTrack) {
+                this.peers.forEach(pc => {
+                    const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+                    if (sender) sender.replaceTrack(virtualTrack);
+                });
+            }
+
+            // Show virtual stream in local tile
+            const lv = document.getElementById('local-video');
+            if (lv) lv.srcObject = this.virtualBgStream;
+        };
+
+        // Try MediaPipe
+        if (window.SelfieSegmentation) {
+            try {
+                this.selfieSegmentation = new SelfieSegmentation({
+                    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${f}`
+                });
+                this.selfieSegmentation.setOptions({ modelSelection: 1, selfieMode: false });
+                this.selfieSegmentation.onResults(r => this._onSegmentResults(r));
+                await this.selfieSegmentation.initialize();
+                startCapture();
+
+                const processFrame = async () => {
+                    if (this.virtualBgType === 'none' || !this._vbVideoEl) return;
+                    try { await this.selfieSegmentation.send({ image: this._vbVideoEl }); } catch(e) {}
+                    this._vbAnimId = requestAnimationFrame(processFrame);
+                };
+                this._vbAnimId = requestAnimationFrame(processFrame);
+                this._showToast('רקע וירטואלי פעיל');
+                return;
+            } catch(e) {
+                console.warn('MediaPipe failed, using fallback:', e);
+                if (this.selfieSegmentation) { try { await this.selfieSegmentation.close(); } catch(e2) {} this.selfieSegmentation = null; }
+            }
+        }
+
+        // Fallback: simple canvas (no segmentation — full blur)
+        startCapture();
+        const renderFallback = () => {
+            if (this.virtualBgType === 'none' || !this._vbVideoEl) return;
+            const ctx = this.virtualBgCtx;
+            const canvas = this.virtualBgCanvas;
+            ctx.save();
+            if (this.virtualBgType === 'blur') {
+                ctx.filter = 'blur(10px)';
+                ctx.drawImage(this._vbVideoEl, 0, 0, canvas.width, canvas.height);
+            } else {
+                this._drawPresetBg(ctx, canvas.width, canvas.height);
+                ctx.globalAlpha = 0.85;
+                ctx.drawImage(this._vbVideoEl, 0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = 1;
+            }
+            ctx.restore();
+            this._vbAnimId = requestAnimationFrame(renderFallback);
+        };
+        this._vbAnimId = requestAnimationFrame(renderFallback);
+        this._showToast('רקע וירטואלי פעיל (מצב בסיסי)');
+    }
+
+    _onSegmentResults(results) {
+        if (this.virtualBgType === 'none' || !this.virtualBgCtx) return;
+        const canvas = this.virtualBgCanvas;
+        const ctx = this.virtualBgCtx;
+        const w = canvas.width, h = canvas.height;
+
+        ctx.save();
+        ctx.clearRect(0, 0, w, h);
+
+        // Step 1: Draw the person from original image
+        ctx.drawImage(results.image, 0, 0, w, h);
+
+        // Step 2: Mask — keep only person pixels (white=person in segmentation mask)
+        ctx.globalCompositeOperation = 'destination-in';
+        ctx.drawImage(results.segmentationMask, 0, 0, w, h);
+
+        // Step 3: Draw background BEHIND person
+        ctx.globalCompositeOperation = 'destination-over';
+        if (this.virtualBgType === 'blur') {
+            ctx.filter = 'blur(18px)';
+            ctx.drawImage(results.image, -30, -30, w + 60, h + 60);
+            ctx.filter = 'none';
+        } else if (this.virtualBgType === 'preset') {
+            this._drawPresetBg(ctx, w, h);
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.restore();
+    }
+
+    _drawPresetBg(ctx, w, h) {
+        const presets = {
+            night:  () => { ctx.fillStyle = '#0a1628'; ctx.fillRect(0, 0, w, h); },
+            forest: () => { ctx.fillStyle = '#0d2818'; ctx.fillRect(0, 0, w, h); },
+            galaxy: () => {
+                const g = ctx.createLinearGradient(0, 0, w, h);
+                g.addColorStop(0, '#1a0533'); g.addColorStop(1, '#2d1b69');
+                ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            },
+            sea: () => {
+                const g = ctx.createLinearGradient(0, 0, w, h);
+                g.addColorStop(0, '#1a3a5c'); g.addColorStop(1, '#0a7575');
+                ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            },
+            coffee: () => {
+                const g = ctx.createLinearGradient(0, 0, w, h);
+                g.addColorStop(0, '#3a1a0a'); g.addColorStop(1, '#6b3a1f');
+                ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            },
+            office: () => {
+                const g = ctx.createLinearGradient(0, 0, w, h);
+                g.addColorStop(0, '#1e293b'); g.addColorStop(1, '#334155');
+                ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+            }
+        };
+        const draw = presets[this.virtualBgPreset];
+        if (draw) draw();
+        else { ctx.fillStyle = '#0a1628'; ctx.fillRect(0, 0, w, h); }
+    }
+
+    _stopVBProcessing() {
+        if (this._vbAnimId) { cancelAnimationFrame(this._vbAnimId); this._vbAnimId = null; }
+        if (this.selfieSegmentation) {
+            try { this.selfieSegmentation.close(); } catch(e) {}
+            this.selfieSegmentation = null;
+        }
+        if (this._vbVideoEl) { this._vbVideoEl.pause(); this._vbVideoEl = null; }
+        if (this.virtualBgStream) { this.virtualBgStream.getTracks().forEach(t => t.stop()); this.virtualBgStream = null; }
+        this.virtualBgCanvas = null; this.virtualBgCtx = null;
+        this.virtualBgType = 'none'; this.virtualBgPreset = null;
+
+        // Restore original camera track to peers
+        if (this.localStream && !this.isScreenSharing) {
+            const camTrack = this.localStream.getVideoTracks()[0];
+            if (camTrack) {
+                this.peers.forEach(pc => {
+                    const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+                    if (sender) sender.replaceTrack(camTrack).catch(() => {});
+                });
+            }
+            const lv = document.getElementById('local-video');
+            if (lv && this.localStream) lv.srcObject = this.localStream;
+        }
     }
 
     // ── Polls ─────────────────────────────────────────────────────────────────

@@ -429,9 +429,12 @@ io.on('connection', (socket) => {
     const room = zoomRooms.get(roomId);
     if (!room || !isHostOrCoHost(socket.id, room)) return;
     room.breakout.rooms.forEach(br => br.participants.delete(targetSocketId));
-    const br = room.breakout.rooms.get(brId);
-    if (br) br.participants.add(targetSocketId);
-    socket.emit('zoom:breakout-rooms-updated', { rooms: breakoutToArray(room.breakout.rooms) });
+    if (brId) {
+      const br = room.breakout.rooms.get(brId);
+      if (br) br.participants.add(targetSocketId);
+    }
+    // Emit updated rooms + full participant list so client can show unassigned pool
+    socket.emit('zoom:breakout-rooms-updated', { rooms: breakoutToArray(room.breakout.rooms), participants: getParticipants(room) });
   });
 
   socket.on('zoom:random-assign-breakout', ({ roomId }) => {
@@ -445,7 +448,7 @@ io.on('connection', (socket) => {
     const keys = Array.from(room.breakout.rooms.keys());
     room.breakout.rooms.forEach(br => br.participants.clear());
     participants.forEach((sid, idx) => room.breakout.rooms.get(keys[idx % keys.length]).participants.add(sid));
-    socket.emit('zoom:breakout-rooms-updated', { rooms: breakoutToArray(room.breakout.rooms) });
+    socket.emit('zoom:breakout-rooms-updated', { rooms: breakoutToArray(room.breakout.rooms), participants: getParticipants(room) });
   });
 
   socket.on('zoom:launch-breakout-rooms', ({ roomId }) => {
@@ -768,9 +771,6 @@ async function createDefaultUsers() {
       console.log(`✅ Admin created: ${a.name}`);
     }
   }
-  // Remove all non-admin users
-  const deleted = await User.deleteMany({ role: { $ne: 'admin' } });
-  if (deleted.deletedCount > 0) console.log(`🗑 Removed ${deleted.deletedCount} non-admin user(s)`);
 }
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'index.html')));

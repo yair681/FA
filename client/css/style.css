@@ -165,13 +165,21 @@ button { cursor: pointer; border: none; font-family: inherit; }
 /* Timer overlay */
 .zoom-timer-overlay { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.75); color: var(--warning); padding: 6px 18px; border-radius: 20px; font-size: 1rem; font-weight: 600; z-index: 50; display: flex; align-items: center; gap: 8px; }
 
+/* Video area wrapper (screen share layout) */
+.zoom-video-area { flex: 1; display: flex; min-width: 0; overflow: hidden; }
+
 /* Video grid */
-.zoom-video-grid { flex: 1; display: grid; gap: 6px; padding: 8px; align-content: start; background: var(--dark); grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); overflow-y: auto; }
-.zoom-video-grid.has-screen-share { grid-template-columns: 1fr; grid-template-rows: auto; }
+.zoom-video-grid { flex: 1; display: grid; gap: 6px; padding: 8px; align-content: start; background: var(--dark); grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); overflow-y: auto; min-width: 0; }
+.zoom-video-grid.has-screen-share { display: flex; align-items: center; justify-content: center; padding: 6px; }
+.zoom-video-grid.has-screen-share .video-tile.dominant { width: 100%; height: 100%; aspect-ratio: unset; max-height: calc(100vh - 130px); }
+
+/* Participants strip (right sidebar when screen sharing) */
+.zoom-video-strip { width: 170px; min-width: 170px; background: var(--dark2); border-left: 1px solid var(--dark3); display: flex; flex-direction: column; gap: 4px; padding: 4px; overflow-y: auto; flex-shrink: 0; }
+.zoom-video-strip .video-tile { width: 100%; aspect-ratio: 16/9; flex-shrink: 0; border-radius: 6px; }
 
 .video-tile { position: relative; background: var(--dark2); border-radius: 10px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid transparent; transition: border-color 0.2s; }
 .video-tile.speaking { border-color: var(--secondary); }
-.video-tile.dominant { grid-column: 1 / -1; aspect-ratio: 16/9; max-height: 60vh; }
+.video-tile.dominant { aspect-ratio: unset; width: 100%; height: 100%; }
 .video-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .video-tile .video-avatar { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: var(--gray); background: var(--dark3); }
 .video-tile-name { position: absolute; bottom: 0; left: 0; right: 0; padding: 6px 10px; background: linear-gradient(transparent, rgba(0,0,0,0.7)); font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
@@ -410,6 +418,28 @@ select.form-control { appearance: none; }
 
 /* Zoom connection status */
 .zoom-connection-status { font-size: 0.8rem; text-align: center; padding: 4px; }
+
+/* ── Virtual Background Picker ───────────────────────────────────────── */
+.bg-options-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.bg-option { cursor: pointer; border-radius: 8px; overflow: hidden; border: 2px solid transparent; transition: border-color 0.2s; text-align: center; }
+.bg-option:hover { border-color: var(--primary); }
+.bg-option.selected { border-color: var(--primary); }
+.bg-option.selected::after { content: '✓'; position: absolute; top: 4px; right: 4px; background: var(--primary); color: #fff; width: 18px; height: 18px; border-radius: 50%; font-size: 0.7rem; display: flex; align-items: center; justify-content: center; }
+.bg-option { position: relative; }
+.bg-preview { width: 100%; height: 70px; border-radius: 6px 6px 0 0; object-fit: cover; display: flex; align-items: center; justify-content: center; }
+.bg-option span { display: block; font-size: 0.75rem; color: var(--gray); padding: 4px 0; background: var(--dark3); }
+.bg-option.selected span { color: var(--white); background: rgba(37,99,235,0.2); }
+
+/* ── Breakout timer overlay (for participants in breakout room) ───────── */
+.breakout-timer-overlay { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(245,158,11,0.15); border: 1px solid var(--warning); color: var(--warning); padding: 8px 20px; border-radius: 20px; font-size: 0.95rem; font-weight: 600; z-index: 60; display: none; align-items: center; gap: 8px; white-space: nowrap; }
+.breakout-timer-overlay.urgent { color: var(--danger); border-color: var(--danger); background: rgba(239,68,68,0.15); animation: pulse 0.5s infinite alternate; }
+
+/* ── Create meeting cards as prominent blue buttons ──────────────────── */
+.create-meeting-card { background: var(--primary); border: none; border-radius: var(--radius); padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; color: var(--white); }
+.create-meeting-card:hover { background: var(--primary-dark); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(37,99,235,0.4); }
+.create-meeting-card i { font-size: 2rem; margin-bottom: 12px; display: block; }
+.create-meeting-card h3 { font-size: 1rem; margin-bottom: 6px; }
+.create-meeting-card p { font-size: 0.82rem; opacity: 0.85; }
 
 /* Responsive */
 @media (max-width: 768px) {
