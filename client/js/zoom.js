@@ -1193,8 +1193,9 @@ class ZoomManager {
     }
 
     closeBreakoutRooms() {
-        if (!this.isHost) return;
-        this.socket.emit('zoom:close-breakout-rooms', { roomId: this.currentRoomId });
+        if (!this.isHost && !this.isCoHost) return;
+        const roomId = this.mainRoomId || this.currentRoomId;
+        this.socket.emit('zoom:close-breakout-rooms', { roomId });
     }
 
     // ── Virtual Background ────────────────────────────────────────────────────
@@ -1682,7 +1683,10 @@ class ZoomManager {
 
     onHandRaised({ socketId, name }) {
         this.raisedHands.set(socketId, name);
-        if (socketId !== this.socket?.id) this._playHandRaisedSound();
+        if (socketId !== this.socket?.id) {
+            this._playHandRaisedSound();
+            if (this.isHost || this.isCoHost) this._showToast('✋ ' + name + ' הרים/ה יד');
+        }
         const row = document.querySelector(`[data-participant-sid="${socketId}"]`);
         if (row) {
             const nameEl = row.querySelector('.zoom-participant-name');
