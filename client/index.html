@@ -1,804 +1,473 @@
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>פרחי אהרון - חטיבה</title>
-    <link rel="stylesheet" href="/css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>מערכת פגישות</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-    <header>
-        <div class="container header-container">
-            <div class="logo">
-                <i class="fas fa-school"></i>
-                <h1>פרחי אהרון - חטיבה</h1>
-            </div>
-            
-            <nav>
-                <ul>
-                    <li><a href="#" class="nav-link active" data-page="home">דף הבית</a></li>
-                    <li><a href="#" class="nav-link" data-page="announcements">הודעות</a></li>
-                    <li><a href="#" class="nav-link" data-page="classes">כיתות</a></li>
-                    <li><a href="#" class="nav-link" data-page="assignments" id="assignments-link">משימות</a></li>
-                    <li><a href="#" class="nav-link" data-page="events">אירועים</a></li>
-                    <li><a href="#" class="nav-link" data-page="history">מה היה לנו עד כה</a></li>
-                    <li><a href="#" class="nav-link" data-page="zoom" id="zoom-link" style="display:none;">שיחות וידאו</a></li>
-                    <li><a href="#" class="nav-link" data-page="settings" id="settings-link" style="display:none;">הגדרות</a></li>
-                    <li><a href="#" class="nav-link" data-page="admin" id="admin-link" style="display:none;">ניהול</a></li>
-                </ul>
-            </nav>
-            
-            <div class="user-info">
-                <span id="user-display">אורח</span>
-                <button id="login-btn" class="btn">התחברות</button>
-                <button id="logout-btn" class="btn" style="display:none;">התנתקות</button>
-            </div>
+
+<!-- ══ AUTH PAGE ══════════════════════════════════════════════════════════ -->
+<div id="page-auth" class="page-auth" style="display:none">
+  <div class="auth-card">
+    <div class="auth-logo"><i class="fas fa-video"></i><h1>מערכת פגישות</h1></div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-tab="login" onclick="showAuthTab('login')">כניסה</button>
+      <button class="auth-tab" data-tab="register" onclick="showAuthTab('register')">הרשמה</button>
+    </div>
+    <div id="form-login" class="auth-form">
+      <input type="email" id="login-email" placeholder="אימייל" class="form-control">
+      <input type="password" id="login-password" placeholder="סיסמה" class="form-control">
+      <button class="btn btn-primary btn-full" onclick="authManager.login()">כניסה</button>
+    </div>
+    <div id="form-register" class="auth-form" style="display:none">
+      <input type="text" id="reg-name" placeholder="שם מלא" class="form-control">
+      <input type="email" id="reg-email" placeholder="אימייל" class="form-control">
+      <input type="password" id="reg-password" placeholder="סיסמה (6+ תווים)" class="form-control">
+      <button class="btn btn-primary btn-full" onclick="authManager.register()">הרשמה</button>
+    </div>
+    <div id="auth-error" class="auth-error"></div>
+  </div>
+</div>
+
+<!-- ══ MAIN APP ════════════════════════════════════════════════════════════ -->
+<div id="app" style="display:none;flex-direction:column;min-height:100vh;">
+  <header class="app-header">
+    <div class="app-logo"><i class="fas fa-video"></i><span>מערכת פגישות</span></div>
+    <nav class="app-nav">
+      <a href="#" class="nav-link" data-page="dashboard" onclick="navigate('dashboard')"><i class="fas fa-home"></i> ראשי</a>
+      <a href="#" class="nav-link" data-page="meetings" onclick="navigate('meetings')"><i class="fas fa-calendar"></i> הפגישות שלי</a>
+      <a href="#" class="nav-link" data-page="settings" onclick="navigate('settings')"><i class="fas fa-cog"></i> הגדרות חשבון</a>
+      <a href="#" class="nav-link" data-page="admin" id="nav-admin" style="display:none" onclick="navigate('admin')"><i class="fas fa-shield-alt"></i> ניהול</a>
+    </nav>
+    <div class="app-user">
+      <span id="header-username"></span>
+      <button class="btn btn-sm btn-outline" onclick="authManager.logout()">יציאה</button>
+    </div>
+  </header>
+
+  <main style="flex:1;overflow-y:auto;">
+
+  <!-- ── Dashboard ──────────────────────────────────────────────────────── -->
+  <div id="page-dashboard" class="page" style="display:none">
+
+    <!-- Connection status -->
+    <div id="zoom-connection-status" class="zoom-connection-status"></div>
+
+    <!-- Meeting creation cards -->
+    <div class="create-section">
+      <h2>יצירת פגישה</h2>
+      <div class="create-cards">
+        <div class="create-meeting-card" onclick="startInstantMeeting()">
+          <i class="fas fa-bolt"></i>
+          <h3>שיחה מיידית</h3>
+          <p>פתח שיחה עכשיו והפוך למארח</p>
         </div>
-    </header>
-
-    <main>
-        <div class="container">
-            <div id="home-page" class="page">
-                <div class="recruitment-section">
-                    <h3>מסיימים יסודי ומתלבטים איפה להמשיך שנה הבאה?</h3>
-                    <p>בואו והצטרפו אלינו לחטיבת הביניים פרחי אהרון</p>
-                    <div class="recruitment-buttons">
-                        <a href="https://68fdda4e0b7f0.site123.me/" class="btn btn-secondary">לאתר הכיתות שלנו</a>
-                        <a href="#" class="btn" onclick="uiManager.showPage('events')">לוח האירועים שלנו</a>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">ברוכים הבאים לחטיבת פרחי אהרון</h2>
-                    </div>
-                    <div class="announcement-content">
-                        <p>מערכת ניהול לימודים מתקדמת למורים, תלמידים והורים. כאן תוכלו למצוא:</p>
-                        <ul>
-                            <li>הודעות ועדכונים שוטפים</li>
-                            <li>משימות ומטלות לימודיות</li>
-                            <li>לוח אירועים ופעילויות</li>
-                            <li>תמונות וסרטונים מהפעילויות</li>
-                            <li>ניהול כיתות ומערכת שעות</li>
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="announcements-page" class="page" style="display:none;">
-                <h2 class="page-title">הודעות</h2>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">כל ההודעות</h2>
-                        <button id="add-global-announcement-btn" class="btn" style="display:none;">הוספת הודעה</button>
-                    </div>
-                    
-                    <div id="global-announcements-list">
-                        <div class="loading">טוען הודעות...</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="classes-page" class="page" style="display:none;">
-                <h2 class="page-title">הכיתות שלי</h2>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">רשימת כיתות</h2>
-                        <button id="add-class-btn" class="btn" style="display:none;">יצירת כיתה</button>
-                    </div>
-                    
-                    <div id="classes-list">
-                        <div class="loading">טוען כיתות...</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="assignments-page" class="page" style="display:none;">
-                <h2 class="page-title">משימות</h2>
-                
-                <div id="student-assignments-section" style="display:none;">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2 class="card-title">המשימות שלי</h2>
-                        </div>
-                        
-                        <div id="assignments-list">
-                            <div class="loading">טוען משימות...</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div id="teacher-assignments-section" style="display:none;">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2 class="card-title">ניהול משימות</h2>
-                            <button id="add-assignment-btn" class="btn">הוספת משימה</button>
-                        </div>
-                        
-                        <div id="teacher-assignments-list">
-                            <div class="loading">טוען משימות...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="guest-assignments-section" style="display:none;">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2 class="card-title">גישה למשימות</h2>
-                        </div>
-                        <div class="announcement-content">
-                            <p>על מנת לצפות במשימות ולהגיש אותן, יש להתחבר למערכת כמשתמש רשום.</p>
-                            <button class="btn" onclick="uiManager.openLoginModal()" style="margin-top: 1rem;">התחברות למערכת</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="events-page" class="page" style="display:none;">
-                <h2 class="page-title">אירועים</h2>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">לוח אירועים</h2>
-                        <button id="add-event-btn" class="btn" style="display:none;">הוספת אירוע</button>
-                    </div>
-                    
-                    <div id="events-list">
-                        <div class="loading">טוען אירועים...</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="history-page" class="page" style="display:none;">
-                <h2 class="page-title">מה היה לנו עד כה</h2>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">גלריית מדיה וקבצים</h2>
-                        <button id="add-media-btn" class="btn" style="display:none;">הוספת מדיה/קובץ</button>
-                    </div>
-                    
-                    <div id="media-gallery">
-                        <div class="loading">טוען מדיה...</div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- ===== עמוד זום ===== -->
-            <div id="zoom-page" class="page" style="display:none;">
-                <h2 class="page-title">שיחות וידאו</h2>
-                <div class="zoom-status-bar">סטטוס: <span id="zoom-connection-status" style="font-weight:600;color:var(--warning)">לא מחובר</span></div>
-
-                <!-- LOBBY -->
-                <div id="zoom-lobby">
-                    <div class="zoom-lobby-grid">
-                        <!-- Create room card -->
-                        <div class="card" id="zoom-create-card">
-                            <div class="card-header"><h2 class="card-title">פתיחת חדר חדש</h2></div>
-                            <div style="padding:1rem;">
-                                <div class="form-group">
-                                    <label>שם החדר</label>
-                                    <input type="text" id="zoom-room-name-input" placeholder="לדוגמה: שיעור מתמטיקה ז1">
-                                </div>
-                                <button id="zoom-create-btn" class="btn" onclick="zoomManager.createRoom()">
-                                    <i class="fas fa-video"></i> פתח חדר
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Active rooms card -->
-                        <div class="card">
-                            <div class="card-header">
-                                <h2 class="card-title">חדרים פעילים</h2>
-                                <button class="btn btn-secondary" onclick="zoomManager.loadRoomsList()"><i class="fas fa-sync-alt"></i> רענן</button>
-                            </div>
-                            <div id="zoom-rooms-list" style="padding:1rem;">
-                                <p class="zoom-no-rooms">אין חדרי שיחה פעילים</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- WAITING SCREEN -->
-                <div id="zoom-waiting-screen" style="display:none; flex-direction:column; align-items:center; justify-content:center; min-height:50vh; text-align:center;">
-                    <div class="zoom-waiting-icon"><i class="fas fa-hourglass-half"></i></div>
-                    <h3>ממתין לאישור המארח...</h3>
-                    <p class="zoom-waiting-room-name" style="color:var(--gray);margin-top:0.5rem;"></p>
-                    <button class="btn btn-secondary" style="margin-top:1.5rem;" onclick="zoomManager.onDenied()">ביטול</button>
-                </div>
-
-                <!-- CALL CONTAINER -->
-                <div id="zoom-call-container" style="display:none;flex-direction:column;">
-                    <!-- Header with controls -->
-                    <div class="zoom-call-header">
-                        <div class="zoom-call-header-info">
-                            <i class="fas fa-video" style="color:var(--secondary)"></i>
-                            <span id="zoom-call-title">שיחה</span>
-                            <span id="zoom-participant-count" class="zoom-count-badge">0 משתתפים</span>
-                        </div>
-                        <div class="zoom-controls">
-                            <button id="zoom-audio-btn" class="zoom-ctrl-btn" title="מיקרופון" onclick="zoomManager.toggleAudio()"><i class="fas fa-microphone"></i></button>
-                            <button id="zoom-video-btn" class="zoom-ctrl-btn" title="מצלמה" onclick="zoomManager.toggleVideo()"><i class="fas fa-video"></i></button>
-                            <button id="zoom-screen-btn" class="zoom-ctrl-btn" title="שתף מסך" onclick="zoomManager.toggleScreenShare()"><i class="fas fa-desktop"></i></button>
-                            <label class="zoom-audio-share-label" title="שתף גם את הצליל">
-                                <input type="checkbox" id="zoom-screen-audio">
-                                <i class="fas fa-volume-up"></i>
-                            </label>
-                            <div class="zoom-ctrl-separator"></div>
-                            <button id="zoom-btn-participants" class="zoom-ctrl-btn" title="משתתפים" onclick="zoomManager.togglePanel('participants')"><i class="fas fa-users"></i></button>
-                            <button id="zoom-btn-chat" class="zoom-ctrl-btn" title="צ'אט" onclick="zoomManager.togglePanel('chat')">
-                                <i class="fas fa-comment"></i>
-                                <span id="zoom-chat-badge" class="zoom-ctrl-badge" style="display:none">0</span>
-                            </button>
-                            <button id="zoom-btn-manage" class="zoom-ctrl-btn" title="ניהול פגישה" style="display:none;" onclick="zoomManager.togglePanel('manage')"><i class="fas fa-cog"></i></button>
-                            <div class="zoom-ctrl-separator"></div>
-                            <button id="zoom-leave-btn" class="zoom-ctrl-btn leave" title="עזוב" onclick="zoomManager.leaveRoom()"><i class="fas fa-phone-slash"></i></button>
-                            <button id="zoom-end-meeting-btn" class="zoom-ctrl-btn end" title="סיים פגישה לכולם" style="display:none;" onclick="zoomManager.endMeeting()"><i class="fas fa-times-circle"></i> סיים</button>
-                        </div>
-                    </div>
-
-                    <!-- Body: video grid full width -->
-                    <div class="zoom-call-body">
-                        <div id="zoom-video-grid" class="zoom-video-grid"></div>
-                    </div>
-
-                    <!-- Floating: Participants panel -->
-                    <div id="zoom-panel-participants" class="zoom-floating-panel" style="display:none;">
-                        <div class="zoom-panel-header">
-                            <span><i class="fas fa-users"></i> משתתפים</span>
-                            <button class="zoom-panel-close" onclick="zoomManager.togglePanel('participants')"><i class="fas fa-times"></i></button>
-                        </div>
-                        <div id="zoom-participants-panel" class="zoom-panel-body"></div>
-                    </div>
-
-                    <!-- Floating: Chat panel -->
-                    <div id="zoom-panel-chat" class="zoom-floating-panel" style="display:none;">
-                        <div class="zoom-panel-header">
-                            <span><i class="fas fa-comment"></i> צ'אט</span>
-                            <button class="zoom-panel-close" onclick="zoomManager.togglePanel('chat')"><i class="fas fa-times"></i></button>
-                        </div>
-                        <div id="zoom-chat-messages" class="zoom-chat-messages zoom-panel-body"></div>
-                        <div class="zoom-chat-input-row">
-                            <input type="text" id="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter') zoomManager.sendChat()">
-                            <button onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- Floating: Manage panel (host/cohost only) -->
-                    <div id="zoom-panel-manage" class="zoom-floating-panel" style="display:none;">
-                        <div class="zoom-panel-header">
-                            <span><i class="fas fa-cog"></i> ניהול פגישה <span id="zoom-waiting-badge" class="zoom-badge-count" style="display:none">0</span></span>
-                            <button class="zoom-panel-close" onclick="zoomManager.togglePanel('manage')"><i class="fas fa-times"></i></button>
-                        </div>
-                        <div class="zoom-panel-body">
-                            <!-- Waiting room -->
-                            <div class="zoom-panel-section">
-                                <h4><i class="fas fa-user-clock"></i> ממתינים</h4>
-                                <div id="zoom-waiting-list"><p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p></div>
-                            </div>
-                            <!-- Participant permissions -->
-                            <div class="zoom-panel-section">
-                                <h4><i class="fas fa-shield-alt"></i> הרשאות משתתפים</h4>
-                                <div class="zoom-perm-row">
-                                    <label class="zoom-perm-label">
-                                        <input type="checkbox" id="zoom-perm-mic" checked onchange="zoomManager.updateRoomPermission('allowMic', this.checked)">
-                                        <i class="fas fa-microphone"></i> מיקרופון
-                                    </label>
-                                </div>
-                                <div class="zoom-perm-row">
-                                    <label class="zoom-perm-label">
-                                        <input type="checkbox" id="zoom-perm-camera" checked onchange="zoomManager.updateRoomPermission('allowCamera', this.checked)">
-                                        <i class="fas fa-video"></i> מצלמה
-                                    </label>
-                                </div>
-                                <div class="zoom-perm-row">
-                                    <label class="zoom-perm-label">
-                                        <input type="checkbox" id="zoom-perm-screen" checked onchange="zoomManager.updateRoomPermission('allowScreenShare', this.checked)">
-                                        <i class="fas fa-desktop"></i> שיתוף מסך
-                                    </label>
-                                </div>
-                            </div>
-                            <!-- Chat mode -->
-                            <div class="zoom-panel-section">
-                                <h4><i class="fas fa-comment"></i> הרשאות צ'אט</h4>
-                                <select id="zoom-chat-mode-select" onchange="zoomManager.setChatMode(this.value)" style="width:100%;background:#1a2a4a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.15);padding:0.4rem;border-radius:6px;">
-                                    <option value="everyone">כולם יכולים לשלוח</option>
-                                    <option value="host-only">מארחים בלבד</option>
-                                </select>
-                            </div>
-                            <!-- Whitelist with autocomplete -->
-                            <div class="zoom-panel-section" id="zoom-whitelist-section" style="display:none;">
-                                <h4><i class="fas fa-user-check"></i> כניסה ללא אישור</h4>
-                                <div id="zoom-whitelist-tags" class="zoom-whitelist-tags"></div>
-                                <div style="position:relative;">
-                                    <input type="text" id="zoom-whitelist-input" placeholder="חפש שם משתמש או כיתה..." style="width:100%;background:#1a2a4a;color:#e0e0e0;border:1px solid rgba(255,255,255,0.15);padding:0.5rem;border-radius:6px;margin-top:0.5rem;" oninput="zoomManager.searchWhitelist(this.value)">
-                                    <div id="zoom-whitelist-suggestions" class="zoom-whitelist-suggestions" style="display:none;"></div>
-                                </div>
-                                <button class="btn btn-secondary btn-sm" style="margin-top:0.5rem;width:100%;" onclick="zoomManager.submitWhitelist()">שמור רשימה</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- ===== סוף עמוד זום ===== -->
-
-            <div id="settings-page" class="page" style="display:none;">
-                <h2 class="page-title">הגדרות</h2>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">שינוי סיסמה</h2>
-                    </div>
-                    
-                    <form id="change-password-form">
-                        <div class="form-group">
-                            <label for="current-password">סיסמה נוכחית</label>
-                            <input type="password" id="current-password" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="new-password">סיסמה חדשה</label>
-                            <input type="password" id="new-password" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="confirm-password">אימות סיסמה חדשה</label>
-                            <input type="password" id="confirm-password" required>
-                        </div>
-                        
-                        <button type="submit" class="btn">שמירת סיסמה</button>
-                    </form>
-                </div>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">הכיתות שלי</h2>
-                    </div>
-                    
-                    <div id="user-classes-list">
-                        <div class="loading">טוען כיתות...</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="admin-page" class="page" style="display:none;">
-                <h2 class="page-title">ניהול מערכת</h2>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">ניהול משתמשים</h2>
-                        <button id="add-user-btn" class="btn">הוספת משתמש</button>
-                    </div>
-                    
-                    <div id="users-list">
-                        <div class="loading">טוען משתמשים...</div>
-                    </div>
-                </div>
-                
-                <div class="card">
-                    <div class="card-header">
-                        <h2 class="card-title">ניהול כל הכיתות</h2>
-                        <button id="admin-add-class-btn" class="btn">יצירת כיתה</button>
-                    </div>
-
-                    <div id="admin-classes-list">
-                        <div class="loading">טוען כיתות...</div>
-                    </div>
-                </div>
-
-                <div class="card" id="admin-zoom-settings">
-                    <div class="card-header">
-                        <h2 class="card-title">הגדרות שיחות וידאו</h2>
-                    </div>
-                    <div style="padding:1rem;">
-                        <div class="form-group">
-                            <label>מי רשאי ליצור שיחות וידאו</label>
-                            <select id="zoom-permission-select" onchange="zoomManager.setCreatePermission(this.value)" style="width:100%;max-width:300px;">
-                                <option value="teacher">מורים ומנהלים בלבד</option>
-                                <option value="all">כל משתמש מחובר</option>
-                            </select>
-                        </div>
-                        <p style="color:var(--gray);font-size:0.85rem;margin-top:0.5rem;">שינוי ההגדרה ייכנס לתוקף מיידית לכל המשתמשים המחוברים.</p>
-                    </div>
-                </div>
-            </div>
+        <div class="create-meeting-card" onclick="openModal('modal-schedule')">
+          <i class="fas fa-calendar-plus"></i>
+          <h3>קבע פגישה</h3>
+          <p>קבע פגישה למועד מאוחר יותר</p>
         </div>
-    </main>
-
-    <footer>
-        <div class="container">
-            <p>© 2023 פרחי אהרון - חטיבה. כל הזכויות שמורות.</p>
+        <div class="create-meeting-card" onclick="openModal('modal-permanent')">
+          <i class="fas fa-infinity"></i>
+          <h3>פגישה קבועה</h3>
+          <p>פגישה שנשמרת וניתן לחזור אליה</p>
         </div>
-    </footer>
-
-    <div id="login-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>התחברות למערכת</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <form id="login-form">
-                <div class="form-group">
-                    <label for="email">אימייל</label>
-                    <input type="email" id="login-email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="password">סיסמה</label>
-                    <input type="password" id="login-password" required>
-                </div>
-                
-                <button type="submit" class="btn" style="width:100%;">התחברות</button>
-            </form>
-            
-            <div id="login-error" style="color:var(--danger); margin-top:1rem; display:none;"></div>
-        </div>
+      </div>
     </div>
 
-    <div id="add-announcement-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הוספת הודעה</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <form id="add-announcement-form">
-                <div class="form-group">
-                    <label for="announcement-title">כותרת</label>
-                    <input type="text" id="announcement-title" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="announcement-content">תוכן</label>
-                    <textarea id="announcement-content" required></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="announcement-type">סוג הודעה</label>
-                    <select id="announcement-type" required>
-                        <option value="global">הודעה כללית</option>
-                        <option value="class">הודעה לכיתה</option>
-                    </select>
-                </div>
-                
-                <div class="form-group" id="class-selection-group" style="display:none;">
-                    <label for="announcement-class">בחירת כיתה</label>
-                    <select id="announcement-class">
-                        </select>
-                </div>
-                
-                <button type="submit" class="btn">פרסום הודעה</button>
-            </form>
-        </div>
+    <!-- Active rooms -->
+    <div class="section">
+      <h2>פגישות פעילות <button class="btn btn-sm btn-outline" onclick="zoomManager.loadRoomsList()" style="margin-right:0.5rem;font-size:0.8rem;"><i class="fas fa-sync"></i></button></h2>
+      <div id="zoom-rooms-list" class="rooms-list"></div>
     </div>
 
-    <div id="add-assignment-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הוספת משימה</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <form id="add-assignment-form">
-                <div class="form-group">
-                    <label for="assignment-title">כותרת</label>
-                    <input type="text" id="assignment-title" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="assignment-description">תיאור</label>
-                    <textarea id="assignment-description" required></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="assignment-class">כיתה</label>
-                    <select id="assignment-class" required>
-                        </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="assignment-due-date">תאריך הגשה</label>
-                    <input type="date" id="assignment-due-date" required>
-                </div>
-                
-                <button type="submit" class="btn">הוספת משימה</button>
-            </form>
-        </div>
+    <!-- ── Waiting screen ── -->
+    <div id="zoom-waiting-screen" style="display:none" class="zoom-waiting-screen">
+      <div class="zoom-waiting-inner">
+        <div class="waiting-icon"><i class="fas fa-clock"></i></div>
+        <h2>ממתין לאישור</h2>
+        <p class="zoom-waiting-room-name"></p>
+        <p>בקשתך להצטרף נשלחה למארח</p>
+        <button class="btn btn-outline" onclick="zoomManager.leaveRoom()">ביטול</button>
+      </div>
     </div>
 
-    <div id="submit-assignment-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הגשת משימה</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <form id="submit-assignment-form">
-                <input type="hidden" id="submission-assignment-id">
-                
-                <div class="form-group">
-                    <label for="submission-text">תשובה (אופציונלי)</label>
-                    <textarea id="submission-text" placeholder="הזן את התשובה שלך כאן..."></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="submission-file">העלאת קובץ (אופציונלי)</label>
-                    <div class="file-upload" id="file-upload-area">
-                        <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; margin-bottom: 1rem; color: var(--gray);"></i>
-                        <p>גרור קובץ לכאן או לחץ לבחירה</p>
-                        <small>כל סוגי הקבצים נתמכים (מקסימום 100MB)</small>
-                        <input type="file" id="submission-file" style="display: none;">
-                    </div>
-                </div>
-                
-                <div id="file-preview" style="display:none; margin-bottom:1rem;">
-                    <div class="file-preview">
-                        <div class="file-info">
-                            <i class="fas fa-file file-icon"></i>
-                            <div class="file-details">
-                                <h4 id="file-name"></h4>
-                                <p id="file-size"></p>
-                            </div>
-                        </div>
-                        <div class="file-actions">
-                            <button type="button" id="remove-file" class="btn btn-danger btn-sm">הסר קובץ</button>
-                        </div>
-                    </div>
-                </div>
-                
-                <button type="submit" class="btn">הגש משימה</button>
-            </form>
-        </div>
-    </div>
+    <!-- ── Call container ── -->
+    <div id="zoom-call-container" style="display:none" class="zoom-call-container">
 
-    <div id="view-submissions-modal" class="modal">
-        <div class="modal-content" style="max-width: 800px;">
-            <div class="modal-header">
-                <h2>הגשות תלמידים</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <div id="submissions-list">
-                <div class="loading">טוען הגשות...</div>
-            </div>
+      <div class="zoom-call-header">
+        <span id="zoom-call-title" class="zoom-call-title"></span>
+        <div class="zoom-call-header-right">
+          <span id="zoom-participant-count" class="zoom-count">0 משתתפים</span>
+          <button class="btn btn-sm btn-outline" onclick="copyMeetingLink()" title="העתק קישור לפגישה">
+            <i class="fas fa-link"></i> קישור
+          </button>
         </div>
-    </div>
+      </div>
 
-    <div id="add-user-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הוספת משתמש</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <form id="add-user-form">
-                <div class="form-group">
-                    <label for="user-name">שם מלא</label>
-                    <input type="text" id="user-name" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="user-email">אימייל</label>
-                    <input type="email" id="user-email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="user-password">סיסמה</label>
-                    <input type="password" id="user-password" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="user-role">תפקיד</label>
-                    <select id="user-role" required>
-                        <option value="student">תלמיד</option>
-                        <option value="teacher">מורה</option>
-                        <option value="admin">מנהל מערכת</option>
-                    </select>
-                </div>
-                
-                <button type="submit" class="btn">יצירת משתמש</button>
-            </form>
+      <div class="zoom-call-body">
+        <div id="zoom-video-grid" class="zoom-video-grid"></div>
+
+        <!-- Participants panel -->
+        <div id="zoom-panel-participants" class="zoom-side-panel" style="display:none">
+          <div class="zoom-panel-header">
+            <span>משתתפים</span>
+            <button onclick="zoomManager.togglePanel('participants')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="zoom-join-link-box">
+            <span>קישור לפגישה:</span>
+            <input id="zoom-room-link" class="zoom-link-input" readonly onclick="this.select()">
+            <button class="btn btn-sm btn-outline" onclick="copyMeetingLink()"><i class="fas fa-copy"></i></button>
+          </div>
+          <div id="zoom-participants-panel" class="zoom-participants-list"></div>
+          <div id="zoom-waiting-list"></div>
+          <div style="font-size:0.8rem;margin-top:0.5rem;">
+            ממתינים: <span id="zoom-waiting-badge" style="display:none" class="badge"></span>
+          </div>
         </div>
-    </div>
 
-    <div id="add-class-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>יצירת כיתה</h2>
-                <button class="close-modal">&times;</button>
-            </div>
-            
-            <form id="add-class-form">
-                <div class="form-group">
-                    <label for="class-name">שם הכיתה</label>
-                    <input type="text" id="class-name" required placeholder="לדוגמה: כיתה ז'1">
-                </div>
-                
-                <div class="form-group">
-                    <label for="class-teachers">מורים נוספים (אופציונלי)</label>
-                    <select id="class-teachers" multiple>
-                        </select>
-                    <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה מורים</small>
-                </div>
-                
-                <button type="submit" class="btn">יצירת כיתה</button>
-            </form>
+        <!-- Chat panel -->
+        <div id="zoom-panel-chat" class="zoom-side-panel" style="display:none">
+          <div class="zoom-panel-header">
+            <span>צ'אט</span>
+            <button onclick="zoomManager.togglePanel('chat')"><i class="fas fa-times"></i></button>
+          </div>
+          <select id="zoom-chat-mode-select" onchange="zoomManager.setChatMode(this.value)" class="form-control" style="margin:0.5rem;font-size:0.8rem;">
+            <option value="everyone">כולם יכולים לכתוב</option>
+            <option value="host-only">מארח בלבד</option>
+          </select>
+          <div id="zoom-chat-messages" class="zoom-chat-messages"></div>
+          <div class="zoom-chat-input-row">
+            <input id="zoom-chat-input" class="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter')zoomManager.sendChat()">
+            <button onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
+          </div>
         </div>
-    </div>
 
-    <div id="add-student-to-class-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הוספת תלמיד לכיתה</h2>
-                <button class="close-modal">&times;</button>
+        <!-- Manage panel (host/cohost) -->
+        <div id="zoom-panel-manage" class="zoom-side-panel" style="display:none">
+          <div class="zoom-panel-header">
+            <span>ניהול פגישה</span>
+            <button onclick="zoomManager.togglePanel('manage')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="manage-section">
+            <h4>הרשאות משתתפים</h4>
+            <label class="perm-row"><input type="checkbox" id="zoom-perm-mic" onchange="zoomManager.updateRoomPermission('allowMic',this.checked)" checked> מיקרופון</label>
+            <label class="perm-row"><input type="checkbox" id="zoom-perm-camera" onchange="zoomManager.updateRoomPermission('allowCamera',this.checked)" checked> מצלמה</label>
+            <label class="perm-row"><input type="checkbox" id="zoom-perm-screen" onchange="zoomManager.updateRoomPermission('allowScreenShare',this.checked)" checked> שיתוף מסך</label>
+          </div>
+          <div id="zoom-whitelist-section" class="manage-section" style="display:none">
+            <h4>רשימה לבנה</h4>
+            <div style="position:relative;">
+              <input id="zoom-whitelist-input" class="form-control" placeholder="חפש משתמש..." oninput="zoomManager.searchWhitelist(this.value)">
+              <div id="zoom-whitelist-suggestions" class="zoom-suggestions" style="display:none"></div>
             </div>
-            
-            <form id="add-student-to-class-form">
-                <input type="hidden" id="add-student-class-id">
-                
-                <div class="form-group">
-                    <label for="student-select">בחר תלמיד להוספה</label>
-                    <select id="student-select" required>
-                        </select>
-                    <small>רשימה זו מציגה תלמידים שעדיין לא נמצאים בכיתה</small>
-                </div>
-                
-                <button type="submit" class="btn">הוסף תלמיד</button>
-            </form>
+            <div id="zoom-whitelist-tags" class="zoom-tags"></div>
+            <button class="btn btn-primary btn-sm" onclick="zoomManager.submitWhitelist()">שמור רשימה</button>
+          </div>
+          <div class="manage-section">
+            <h4>שיתוף מסך</h4>
+            <label class="perm-row">
+              <input type="checkbox" id="zoom-screen-audio"> כלול אודיו בשיתוף
+            </label>
+          </div>
         </div>
-    </div>
 
-    <div id="edit-class-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>עריכת כיתה</h2>
-                <button class="close-modal">&times;</button>
+        <!-- Plugins panel (host/cohost only) -->
+        <div id="zoom-panel-plugins" class="zoom-side-panel zoom-plugins-panel" style="display:none">
+          <div class="zoom-panel-header">
+            <span>תוספים</span>
+            <button onclick="zoomManager.togglePanel('plugins')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="plugin-tabs">
+            <button class="plugin-tab-btn active" data-tab="breakout" onclick="zoomManager.showPluginTab('breakout')">חדרים</button>
+            <button class="plugin-tab-btn" data-tab="polls" onclick="zoomManager.showPluginTab('polls')">סקרים</button>
+            <button class="plugin-tab-btn" data-tab="qa" onclick="zoomManager.showPluginTab('qa')">שאלות</button>
+            <button class="plugin-tab-btn" data-tab="timer" onclick="zoomManager.showPluginTab('timer')">טיימר</button>
+          </div>
+
+          <!-- Breakout Rooms tab -->
+          <div id="plugin-tab-breakout" class="plugin-tab-content" style="padding:0.75rem;">
+            <h4 style="margin-bottom:0.5rem;">חדרי פרצת</h4>
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
+              <label style="font-size:0.85rem;">מספר חדרים:</label>
+              <input type="number" id="breakout-count" value="2" min="2" max="20" class="form-control" style="width:70px;">
+              <button class="btn btn-primary btn-sm" onclick="zoomManager.createBreakoutRooms()">צור חדרים</button>
             </div>
-            
-            <form id="edit-class-form">
-                <div class="form-group">
-                    <label for="edit-class-name">שם הכיתה</label>
-                    <input type="text" id="edit-class-name" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-class-teachers">מורים</label>
-                    <select id="edit-class-teachers" multiple>
-                        </select>
-                    <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה מורים</small>
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-class-students">תלמידים</label>
-                    <select id="edit-class-students" multiple>
-                        </select>
-                    <small>החזק Ctrl (או Cmd במקב) כדי לבחור כמה תלמידים</small>
-                </div>
-                
-                <button type="submit" class="btn">שמירת שינויים</button>
-            </form>
-        </div>
-    </div>
+            <div id="breakout-assign-area"></div>
+            <div id="breakout-timer-display" style="margin-top:0.5rem;font-size:0.85rem;color:var(--warning);"></div>
+          </div>
 
-    <div id="edit-user-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>עריכת משתמש</h2>
-                <button class="close-modal">&times;</button>
+          <!-- Polls tab -->
+          <div id="plugin-tab-polls" class="plugin-tab-content" style="display:none;padding:0.75rem;">
+            <h4 style="margin-bottom:0.5rem;">סקרים</h4>
+            <div style="margin-bottom:1rem;">
+              <input id="poll-question" class="form-control" placeholder="שאלת הסקר..." style="margin-bottom:0.5rem;">
+              <div id="poll-options-container">
+                <input type="text" class="form-control poll-option-input" placeholder="אפשרות 1" style="margin-bottom:0.4rem;">
+                <input type="text" class="form-control poll-option-input" placeholder="אפשרות 2" style="margin-bottom:0.4rem;">
+              </div>
+              <button class="btn btn-sm btn-outline" onclick="zoomManager.addPollOption()" style="margin-bottom:0.5rem;">+ אפשרות</button>
+              <button class="btn btn-sm btn-primary" onclick="zoomManager.createPoll()">פרסם סקר</button>
             </div>
-            
-            <form id="edit-user-form">
-                <div class="form-group">
-                    <label for="edit-user-name">שם מלא</label>
-                    <input type="text" id="edit-user-name" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-user-email">אימייל</label>
-                    <input type="email" id="edit-user-email" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-user-role">תפקיד</label>
-                    <select id="edit-user-role" required>
-                        <option value="student">תלמיד</option>
-                        <option value="teacher">מורה</option>
-                        <option value="admin">מנהל מערכת</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="edit-user-password">סיסמה חדשה (לא חובה)</label>
-                    <input type="password" id="edit-user-password" placeholder="השאר ריק אם לא רוצה לשנות">
-                </div>
-                
-                <button type="submit" class="btn">שמירת שינויים</button>
-            </form>
-        </div>
-    </div>
+            <div id="polls-list"></div>
+          </div>
 
-    <div id="add-event-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הוספת אירוע</h2>
-                <button class="close-modal">&times;</button>
+          <!-- Q&A tab -->
+          <div id="plugin-tab-qa" class="plugin-tab-content" style="display:none;padding:0.75rem;">
+            <h4 style="margin-bottom:0.5rem;">שאלות ותשובות</h4>
+            <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+              <span>הפעל שאלות:</span>
+              <label class="toggle-switch">
+                <input type="checkbox" id="qa-toggle" onchange="zoomManager.toggleQA()">
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-            
-            <form id="add-event-form">
-                <div class="form-group">
-                    <label for="event-title">כותרת</label>
-                    <input type="text" id="event-title" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="event-description">תיאור</label>
-                    <textarea id="event-description" required></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="event-date">תאריך</label>
-                    <input type="date" id="event-date" required>
-                </div>
-                
-                <button type="submit" class="btn">הוספת אירוע</button>
-            </form>
-        </div>
-    </div>
-
-    <div id="add-media-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>הוספת מדיה/קובץ</h2>
-                <button class="close-modal">&times;</button>
+            <label class="perm-row" style="margin-bottom:0.75rem;">
+              <input type="checkbox" id="qa-require-approval"> דרוש אישור לשאלות
+            </label>
+            <div id="qa-section" style="display:none;">
+              <div id="qa-list"></div>
             </div>
-            
-            <form id="add-media-form" enctype="multipart/form-data">
-                <div class="form-group">
-                    <label for="media-title">כותרת</label>
-                    <input type="text" id="media-title" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="media-type">סוג</label>
-                    <select id="media-type" required>
-                        <option value="image">תמונה</option>
-                        <option value="video">סרטון</option>
-                        <option value="file">קובץ כללי (PDF/Word/וכו')</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="media-file">העלאת קובץ</label>
-                    <div class="file-upload" id="media-upload-area">
-                        <i class="fas fa-cloud-upload-alt" style="font-size: 2rem; margin-bottom: 1rem; color: var(--gray);"></i>
-                        <p>גרור קובץ לכאן או לחץ לבחירה</p>
-                        <small id="media-file-types">כל סוגי הקבצים נתמכים (מקסימום 100MB)</small>
-                        <input type="file" id="media-file" style="display: none;">
-                    </div>
-                </div>
-                
-                <div id="media-preview" class="upload-preview" style="display:none;">
-                    </div>
-                
-                <div class="form-group">
-                    <label for="media-date">תאריך</label>
-                    <input type="date" id="media-date" required>
-                </div>
-                
-                <button type="submit" class="btn">הוספת מדיה</button>
-            </form>
-        </div>
-    </div>
+            <div id="qa-submit-area" style="display:none;margin-top:0.75rem;">
+              <input type="text" id="qa-question-input" class="form-control" placeholder="כתוב שאלה...">
+              <button class="btn btn-primary btn-sm" onclick="zoomManager.submitQuestion()" style="margin-top:0.4rem;">שלח שאלה</button>
+            </div>
+          </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="/js/auth.js"></script>
-    <script src="/js/database.js"></script>
-    <script src="/js/ui.js"></script>
-    <script src="/js/app.js"></script>
-    <script src="/js/zoom.js"></script>
+          <!-- Timer tab -->
+          <div id="plugin-tab-timer" class="plugin-tab-content" style="display:none;padding:0.75rem;">
+            <h4 style="margin-bottom:0.5rem;">ספירה לאחור</h4>
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
+              <input type="number" id="timer-minutes" value="5" min="1" max="180" class="form-control" style="width:80px;">
+              <span style="font-size:0.85rem;">דקות</span>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+              <button class="btn btn-primary" onclick="zoomManager.startTimer()"><i class="fas fa-play"></i> הפעל</button>
+              <button class="btn btn-danger btn-sm" onclick="zoomManager.cancelTimer()"><i class="fas fa-stop"></i> בטל</button>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /zoom-call-body -->
+
+      <!-- Call controls bar -->
+      <div class="zoom-controls">
+        <button id="zoom-audio-btn" class="ctrl-btn" onclick="zoomManager.toggleAudio()" title="מיקרופון">
+          <i class="fas fa-microphone"></i>
+        </button>
+        <button id="zoom-video-btn" class="ctrl-btn" onclick="zoomManager.toggleVideo()" title="מצלמה">
+          <i class="fas fa-video"></i>
+        </button>
+        <button id="zoom-screen-btn" class="ctrl-btn" onclick="zoomManager.toggleScreenShare()" title="שתף מסך">
+          <i class="fas fa-desktop"></i>
+        </button>
+
+        <div class="ctrl-separator"></div>
+
+        <button id="zoom-btn-participants" class="ctrl-btn" onclick="zoomManager.togglePanel('participants')" title="משתתפים">
+          <i class="fas fa-users"></i>
+          <span class="ctrl-label">משתתפים</span>
+        </button>
+        <button id="zoom-btn-chat" class="ctrl-btn" onclick="zoomManager.togglePanel('chat')" title="צ'אט" style="position:relative;">
+          <i class="fas fa-comment"></i>
+          <span class="ctrl-label">צ'אט</span>
+          <span id="zoom-chat-badge" class="badge" style="display:none;position:absolute;top:2px;right:2px;"></span>
+        </button>
+        <button id="zoom-btn-manage" class="ctrl-btn" onclick="zoomManager.togglePanel('manage')" style="display:none;" title="ניהול">
+          <i class="fas fa-sliders-h"></i>
+          <span class="ctrl-label">ניהול</span>
+        </button>
+        <button id="zoom-btn-plugins" class="ctrl-btn" onclick="zoomManager.togglePanel('plugins')" style="display:none;" title="תוספים">
+          <i class="fas fa-puzzle-piece"></i>
+          <span class="ctrl-label">תוספים</span>
+        </button>
+
+        <div class="ctrl-separator"></div>
+
+        <button id="zoom-end-meeting-btn" class="ctrl-btn ctrl-end" onclick="zoomManager.endMeeting()" style="display:none;">
+          <i class="fas fa-phone-slash"></i>
+          <span class="ctrl-label">סיים לכולם</span>
+        </button>
+        <button id="zoom-leave-btn" class="ctrl-btn ctrl-leave" onclick="zoomManager.leaveRoom()">
+          <i class="fas fa-sign-out-alt"></i>
+          <span class="ctrl-label">עזוב</span>
+        </button>
+      </div>
+    </div><!-- /zoom-call-container -->
+
+  </div><!-- /page-dashboard -->
+
+  <!-- ── My Meetings ────────────────────────────────────────────────────── -->
+  <div id="page-meetings" class="page" style="display:none">
+    <div class="page-inner">
+      <div class="page-header">
+        <h2><i class="fas fa-calendar"></i> הפגישות שלי</h2>
+        <button class="btn btn-primary" onclick="openModal('modal-permanent')"><i class="fas fa-plus"></i> פגישה קבועה</button>
+      </div>
+      <div id="my-meetings-list" class="meetings-list"></div>
+    </div>
+  </div>
+
+  <!-- ── Account Settings ───────────────────────────────────────────────── -->
+  <div id="page-settings" class="page" style="display:none">
+    <div class="page-inner">
+      <h2><i class="fas fa-cog"></i> הגדרות חשבון</h2>
+      <div class="settings-card">
+        <h3>פרטים אישיים</h3>
+        <p style="color:var(--gray);font-size:0.85rem;margin-bottom:0.5rem;">אימייל: <span id="settings-email"></span></p>
+        <div class="form-group">
+          <label>שם מלא</label>
+          <input type="text" id="settings-name" class="form-control">
+        </div>
+        <button class="btn btn-primary" onclick="saveName()">שמור שם</button>
+      </div>
+      <div class="settings-card">
+        <h3>שינוי סיסמה</h3>
+        <div class="form-group">
+          <label>סיסמה נוכחית</label>
+          <input type="password" id="settings-current-password" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>סיסמה חדשה</label>
+          <input type="password" id="settings-new-password" class="form-control">
+        </div>
+        <div class="form-group">
+          <label>אימות סיסמה חדשה</label>
+          <input type="password" id="settings-confirm-password" class="form-control">
+        </div>
+        <button class="btn btn-primary" onclick="savePassword()">שנה סיסמה</button>
+      </div>
+      <div class="settings-card danger-zone">
+        <h3>מחיקת חשבון</h3>
+        <p>פעולה זו אינה ניתנת לביטול. כל הנתונים שלך יימחקו לצמיתות.</p>
+        <button class="btn btn-danger" onclick="deleteAccount()"><i class="fas fa-trash"></i> מחק חשבון</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Admin Panel ────────────────────────────────────────────────────── -->
+  <div id="page-admin" class="page" style="display:none">
+    <div class="page-inner">
+      <h2><i class="fas fa-shield-alt"></i> לוח ניהול</h2>
+      <div class="admin-tabs">
+        <button class="admin-tab-btn active" data-tab="users" onclick="showAdminTab('users')">משתמשים</button>
+        <button class="admin-tab-btn" data-tab="meetings" onclick="showAdminTab('meetings')">פגישות פעילות</button>
+        <button class="admin-tab-btn" data-tab="settings" onclick="showAdminTab('settings')">הגדרות מערכת</button>
+      </div>
+
+      <div id="admin-tab-users" class="admin-tab-content">
+        <div class="admin-toolbar">
+          <h3>משתמשים רשומים</h3>
+          <button class="btn btn-sm btn-outline" onclick="loadAdminUsers()"><i class="fas fa-sync"></i> רענן</button>
+        </div>
+        <div class="table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>שם</th><th>אימייל</th><th>תפקיד</th><th>הצטרף</th><th>פעולות</th></tr></thead>
+            <tbody id="admin-users-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="admin-tab-meetings" class="admin-tab-content" style="display:none">
+        <div class="admin-toolbar">
+          <h3>פגישות פעילות</h3>
+          <button class="btn btn-sm btn-outline" onclick="loadAdminMeetings()"><i class="fas fa-sync"></i> רענן</button>
+        </div>
+        <div id="admin-meetings-list"></div>
+      </div>
+
+      <div id="admin-tab-settings" class="admin-tab-content" style="display:none">
+        <h3>הגדרות מערכת</h3>
+        <div class="settings-card">
+          <label class="perm-row">
+            <input type="checkbox" id="admin-lock-creation">
+            <strong>נעל יצירת פגישות</strong> — רק מנהלים יוכלו ליצור פגישות
+          </label>
+          <button class="btn btn-primary" style="margin-top:1rem;" onclick="saveAdminSettings()">שמור הגדרות</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </main>
+</div><!-- /app -->
+
+<!-- ══ JOIN PAGE ══════════════════════════════════════════════════════════ -->
+<div id="page-join" style="display:none" class="page-join">
+  <div class="join-card">
+    <div class="auth-logo"><i class="fas fa-video"></i></div>
+    <h2 id="join-meeting-title">הצטרף לפגישה</h2>
+    <p style="color:var(--gray);margin-bottom:1rem;">הזן את שמך כדי להצטרף</p>
+    <input type="text" id="join-guest-name" class="form-control" placeholder="השם שלך...">
+    <button class="btn btn-primary btn-full" onclick="proceedJoin()" style="margin-top:0.75rem;">הצטרף <i class="fas fa-arrow-left"></i></button>
+    <a href="/" class="join-back" style="display:block;text-align:center;margin-top:1rem;color:var(--gray);font-size:0.85rem;">חזור לדף הבית</a>
+  </div>
+</div>
+
+<!-- ══ MODALS ════════════════════════════════════════════════════════════ -->
+
+<!-- Schedule meeting -->
+<div id="modal-schedule" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header"><h3>קבע פגישה</h3><button onclick="closeModal('modal-schedule')"><i class="fas fa-times"></i></button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>כותרת הפגישה</label><input type="text" id="sched-title" class="form-control" placeholder="שם הפגישה..."></div>
+      <div class="form-group"><label>תאריך</label><input type="date" id="sched-date" class="form-control"></div>
+      <div class="form-group"><label>שעה</label><input type="time" id="sched-time" class="form-control"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-schedule')">ביטול</button>
+      <button class="btn btn-primary" onclick="createScheduledMeeting()">שמור פגישה</button>
+    </div>
+  </div>
+</div>
+
+<!-- Permanent meeting -->
+<div id="modal-permanent" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header"><h3>פגישה קבועה</h3><button onclick="closeModal('modal-permanent')"><i class="fas fa-times"></i></button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>שם הפגישה</label><input type="text" id="perm-title" class="form-control" placeholder="שם הפגישה..."></div>
+      <label class="perm-row"><input type="checkbox" id="perm-require-approval"> דרוש אישור כניסה</label>
+      <label class="perm-row"><input type="checkbox" id="perm-allow-entry-before"> אפשר כניסה לפני המארח</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-permanent')">ביטול</button>
+      <button class="btn btn-primary" onclick="createPermanentMeeting()">צור פגישה</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit user (admin) -->
+<div id="modal-edit-user" class="modal" style="display:none">
+  <div class="modal-content">
+    <div class="modal-header"><h3>עריכת משתמש</h3><button onclick="closeModal('modal-edit-user')"><i class="fas fa-times"></i></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-user-id">
+      <div class="form-group"><label>שם</label><input type="text" id="edit-user-name" class="form-control"></div>
+      <div class="form-group"><label>אימייל</label><input type="email" id="edit-user-email" class="form-control"></div>
+      <div class="form-group">
+        <label>תפקיד</label>
+        <select id="edit-user-role" class="form-control">
+          <option value="user">משתמש</option>
+          <option value="admin">מנהל</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeModal('modal-edit-user')">ביטול</button>
+      <button class="btn btn-primary" onclick="saveEditUser()">שמור</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/meetings.js"></script>
+<script src="/js/zoom.js"></script>
+<script src="/js/app.js"></script>
 </body>
 </html>

@@ -8,61 +8,106 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import multer from 'multer';
-import fs from 'fs';
 
-// Fix for __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
-const io = new SocketIOServer(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
-});
+const io = new SocketIOServer(httpServer, { cors: { origin: '*', methods: ['GET', 'POST'] } });
 const PORT = process.env.PORT || 10000;
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET || 'zoom-app-secret-2024';
 
-// --- Zoom / WebRTC Room Management ---
+// ── MongoDB Schemas ──────────────────────────────────────────────────────────
+const userSchema = new mongoose.Schema({
+  name:      { type: String, required: true },
+  email:     { type: String, required: true, unique: true },
+  password:  { type: String, required: true },
+  role:      { type: String, enum: ['admin', 'user'], default: 'user' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const meetingSchema = new mongoose.Schema({
+  title:       { type: String, required: true },
+  hostId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  hostName:    { type: String, required: true },
+  type:        { type: String, enum: ['scheduled', 'permanent'], required: true },
+  scheduledAt: { type: Date },
+  roomId:      { type: String, required: true, unique: true },
+  status:      { type: String, enum: ['scheduled', 'ended'], default: 'scheduled' },
+  settings: {
+    requireAdminApproval: { type: Boolean, default: false },
+    allowEntryBeforeHost: { type: Boolean, default: false }
+  },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const systemSettingsSchema = new mongoose.Schema({
+  key:                  { type: String, default: 'main', unique: true },
+  lockMeetingCreation:  { type: Boolean, default: false },
+  requireApproval:      { type: Boolean, default: false },
+  allowEntryBeforeHost: { type: Boolean, default: false }
+});
+
+const User           = mongoose.model('User', userSchema);
+const Meeting        = mongoose.model('Meeting', meetingSchema);
+const SystemSettings = mongoose.model('SystemSettings', systemSettingsSchema);
+
+// ── In-memory room store ─────────────────────────────────────────────────────
 const zoomRooms = new Map();
-let zoomCreatePermission = 'teacher'; // 'teacher' | 'all'
+
+function genId() { return Date.now().toString(36) + Math.random().toString(36).substr(2, 6); }
 
 function getParticipants(room) {
   const list = [];
-  room.users.forEach((u, sid) => {
-    list.push({ socketId: sid, name: u.name, userId: u.userId,
-      isHost: sid === room.hostSocketId, isCoHost: u.isCoHost });
-  });
+  room.users.forEach((u, sid) => list.push({
+    socketId: sid, name: u.name, userId: u.userId,
+    isHost: sid === room.hostSocketId, isCoHost: u.isCoHost,
+    audioOn: u.audioOn !== false, videoOn: u.videoOn !== false
+  }));
   return list;
 }
+
 function isHostOrCoHost(socketId, room) {
   if (socketId === room.hostSocketId) return true;
-  const u = room.users.get(socketId); return u && u.isCoHost;
+  const u = room.users.get(socketId);
+  return u && u.isCoHost;
 }
+
 function broadcastRooms() {
   const list = [];
-  zoomRooms.forEach((r, id) => list.push({ roomId: id, name: r.name, participants: r.users.size }));
+  zoomRooms.forEach((r, id) => { if (!r._empty) list.push({ roomId: id, name: r.name, participants: r.users.size }); });
   io.emit('zoom:rooms-list', list);
 }
+
 function notifyWaitingUpdate(room) {
   const waitingList = Array.from(room.waitingRoom.values()).map(w => ({ socketId: w.socketId, name: w.name }));
-  const targets = [room.hostSocketId, ...Array.from(room.users.entries()).filter(([,u]) => u.isCoHost).map(([sid]) => sid)];
-  targets.forEach(sid => io.to(sid).emit('zoom:waiting-update', { waitingList }));
+  const targets = [room.hostSocketId, ...Array.from(room.users.entries()).filter(([, u]) => u.isCoHost).map(([s]) => s)];
+  targets.forEach(sid => { if (sid) io.to(sid).emit('zoom:waiting-update', { waitingList }); });
 }
+
 function admitUser(targetSocket, room, roomId, userName, userId) {
-  room.users.set(targetSocket.id, { name: userName, userId, isCoHost: false });
+  room.users.set(targetSocket.id, { name: userName, userId, isCoHost: false, audioOn: true, videoOn: true });
   targetSocket.join(roomId);
   const existingUsers = [];
   room.users.forEach((u, sid) => {
     if (sid !== targetSocket.id) existingUsers.push({ socketId: sid, name: u.name, isCoHost: u.isCoHost, isHost: sid === room.hostSocketId });
   });
-  targetSocket.emit('zoom:room-joined', { roomId, roomName: room.name, existingUsers, isHost: false, chatMode: room.chatMode || 'everyone', permissions: room.permissions || { allowMic: true, allowCamera: true, allowScreenShare: true } });
+  targetSocket.emit('zoom:room-joined', {
+    roomId, roomName: room.name, existingUsers, isHost: false,
+    chatMode: room.chatMode || 'everyone',
+    permissions: room.permissions || { allowMic: true, allowCamera: true, allowScreenShare: true },
+    settings: room.settings || {}
+  });
   targetSocket.to(roomId).emit('zoom:user-joined', { socketId: targetSocket.id, name: userName });
   io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
   broadcastRooms();
+  if (room.polls && room.polls.size > 0) targetSocket.emit('zoom:polls-state', { polls: pollsToArray(room.polls) });
+  if (room.qa && room.qa.enabled) targetSocket.emit('zoom:qa-state', { enabled: true, requireApproval: room.qa.requireApproval, questions: room.qa.questions.filter(q => q.approved) });
+  if (room.timer && room.timer.active) targetSocket.emit('zoom:timer-state', { active: true, endTime: room.timer.endTime });
 }
+
 function handleUserLeave(socket, roomId) {
   const room = zoomRooms.get(roomId); if (!room) return;
   room.users.delete(socket.id);
@@ -74,7 +119,6 @@ function handleUserLeave(socket, roomId) {
   }
   socket.to(roomId).emit('zoom:user-left', { socketId: socket.id });
   if (socket.id === room.hostSocketId && room.users.size > 0) {
-    // העבר מארחות לאחד מהמשתתפים
     let newHost = null;
     for (const [sid, u] of room.users.entries()) { if (u.isCoHost) { newHost = sid; break; } }
     if (!newHost) newHost = room.users.keys().next().value;
@@ -83,42 +127,147 @@ function handleUserLeave(socket, roomId) {
     io.to(newHost).emit('zoom:role-changed', { role: 'host' });
     io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
   } else if (room.users.size === 0) {
-    zoomRooms.delete(roomId);
+    if (room.permanent) {
+      room._empty = true;
+      if (room.timer && room.timer.timeout) { clearTimeout(room.timer.timeout); room.timer.active = false; }
+    } else {
+      if (room.timer && room.timer.timeout) clearTimeout(room.timer.timeout);
+      if (room.breakout && room.breakout.timer) clearTimeout(room.breakout.timer);
+      zoomRooms.delete(roomId);
+    }
   } else {
     io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
   }
   broadcastRooms();
 }
 
+function pollsToArray(pollsMap) {
+  const arr = [];
+  pollsMap.forEach((p, id) => {
+    const counts = new Array(p.options.length).fill(0);
+    p.votes.forEach(idx => counts[idx]++);
+    arr.push({ id, question: p.question, options: p.options, counts, totalVotes: p.votes.size, closed: p.closed });
+  });
+  return arr;
+}
+
+function breakoutToArray(roomsMap) {
+  const arr = [];
+  roomsMap.forEach((br, id) => arr.push({ id, name: br.name, participants: Array.from(br.participants) }));
+  return arr;
+}
+
+function closeBreakoutRooms(room, roomId) {
+  room.breakout.active = false;
+  room.breakout.rooms.forEach(br => br.participants.forEach(sid => io.to(sid).emit('zoom:return-to-main', { mainRoomId: roomId })));
+  room.breakout.rooms.clear();
+  io.to(roomId).emit('zoom:breakout-closed');
+}
+
+// ── Socket.IO ────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
 
-  socket.on('zoom:create-room', ({ roomId, roomName, userName, userId, userRole }) => {
-    if (zoomCreatePermission === 'teacher' && userRole !== 'teacher' && userRole !== 'admin') {
-      socket.emit('zoom:error', { message: 'אין לך הרשאה ליצור חדרי שיחה' }); return;
+  socket.on('zoom:get-rooms', () => {
+    const list = [];
+    zoomRooms.forEach((r, id) => { if (!r._empty) list.push({ roomId: id, name: r.name, participants: r.users.size }); });
+    socket.emit('zoom:rooms-list', list);
+  });
+
+  socket.on('zoom:get-create-permission', async () => {
+    try {
+      const s = await SystemSettings.findOne({ key: 'main' });
+      socket.emit('zoom:create-permission', { locked: s ? s.lockMeetingCreation : false });
+    } catch { socket.emit('zoom:create-permission', { locked: false }); }
+  });
+
+  socket.on('zoom:create-room', async ({ roomId, roomName, userName, userId, userRole, meetingType, settings }) => {
+    try {
+      const s = await SystemSettings.findOne({ key: 'main' });
+      if (s && s.lockMeetingCreation && userRole !== 'admin') {
+        socket.emit('zoom:error', { message: 'יצירת פגישות נעולה על ידי מנהל המערכת' }); return;
+      }
+    } catch { }
+
+    const existingRoom = zoomRooms.get(roomId);
+    if (existingRoom && existingRoom.permanent && existingRoom._empty) {
+      existingRoom._empty = false;
+      existingRoom.hostSocketId = socket.id;
+      existingRoom.users.set(socket.id, { name: userName, userId, isCoHost: false, audioOn: true, videoOn: true });
+      socket.join(roomId);
+      socket.emit('zoom:room-created', { roomId, roomName: existingRoom.name, permissions: existingRoom.permissions, settings: existingRoom.settings });
+      existingRoom.waitingRoom.forEach((w, wsid) => {
+        const ws = io.sockets.sockets.get(wsid);
+        if (ws && !(existingRoom.settings && existingRoom.settings.requireAdminApproval)) {
+          existingRoom.waitingRoom.delete(wsid);
+          admitUser(ws, existingRoom, roomId, w.name, w.userId);
+        }
+      });
+      if (existingRoom.settings && existingRoom.settings.requireAdminApproval) notifyWaitingUpdate(existingRoom);
+      broadcastRooms(); return;
     }
-    zoomRooms.set(roomId, {
+
+    const room = {
       name: roomName, hostSocketId: socket.id, hostUserId: userId,
-      users: new Map([[socket.id, { name: userName, userId, isCoHost: false }]]),
-      waitingRoom: new Map(),
-      whitelist: new Set(),
-      screenShareSocketId: null,
-      chatMode: 'everyone',
-      permissions: { allowMic: true, allowCamera: true, allowScreenShare: true }
-    });
+      users: new Map([[socket.id, { name: userName, userId, isCoHost: false, audioOn: true, videoOn: true }]]),
+      waitingRoom: new Map(), whitelist: new Set(),
+      screenShareSocketId: null, chatMode: 'everyone',
+      permissions: { allowMic: true, allowCamera: true, allowScreenShare: true },
+      meetingType: meetingType || 'instant', permanent: meetingType === 'permanent', _empty: false,
+      settings: settings || { requireAdminApproval: false, allowEntryBeforeHost: false },
+      breakout: { active: false, rooms: new Map(), timer: null },
+      polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
+      timer: { active: false, endTime: null, timeout: null }
+    };
+    zoomRooms.set(roomId, room);
     socket.join(roomId);
-    socket.emit('zoom:room-created', { roomId, roomName, permissions: { allowMic: true, allowCamera: true, allowScreenShare: true } });
+    socket.emit('zoom:room-created', { roomId, roomName, permissions: room.permissions, settings: room.settings });
     broadcastRooms();
   });
 
-  socket.on('zoom:request-join', ({ roomId, userName, userId }) => {
-    const room = zoomRooms.get(roomId);
-    if (!room) { socket.emit('zoom:error', { message: 'החדר לא נמצא' }); return; }
-    if (room.whitelist.has(String(userId))) {
+  socket.on('zoom:request-join', async ({ roomId, userName, userId }) => {
+    let room = zoomRooms.get(roomId);
+
+    if (!room || room._empty) {
+      try {
+        const meeting = await Meeting.findOne({ roomId, type: 'permanent' });
+        if (meeting) {
+          const sysSettings = await SystemSettings.findOne({ key: 'main' });
+          const allowBefore = meeting.settings.allowEntryBeforeHost || (sysSettings && sysSettings.allowEntryBeforeHost);
+          if (allowBefore) {
+            if (!room) {
+              room = {
+                name: meeting.title, hostSocketId: null, hostUserId: meeting.hostId.toString(),
+                users: new Map(), waitingRoom: new Map(), whitelist: new Set(),
+                screenShareSocketId: null, chatMode: 'everyone',
+                permissions: { allowMic: true, allowCamera: true, allowScreenShare: true },
+                meetingType: 'permanent', permanent: true, _empty: true,
+                settings: meeting.settings,
+                breakout: { active: false, rooms: new Map(), timer: null },
+                polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
+                timer: { active: false, endTime: null, timeout: null }
+              };
+              zoomRooms.set(roomId, room);
+            }
+            room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId });
+            socket.emit('zoom:waiting', { roomName: room.name, waitingForHost: true });
+            return;
+          } else {
+            socket.emit('zoom:error', { message: 'המארח טרם פתח את הפגישה' }); return;
+          }
+        }
+      } catch { }
+      socket.emit('zoom:error', { message: 'החדר לא נמצא' }); return;
+    }
+
+    if (room.whitelist.size > 0 && room.whitelist.has(String(userId))) {
       admitUser(socket, room, roomId, userName, userId); return;
     }
-    room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId });
-    socket.emit('zoom:waiting', { roomName: room.name });
-    notifyWaitingUpdate(room);
+    if (room.settings && room.settings.requireAdminApproval) {
+      room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId });
+      socket.emit('zoom:waiting', { roomName: room.name });
+      notifyWaitingUpdate(room); return;
+    }
+    admitUser(socket, room, roomId, userName, userId);
   });
 
   socket.on('zoom:approve-join', ({ roomId, targetSocketId }) => {
@@ -126,8 +275,8 @@ io.on('connection', (socket) => {
     if (!room || !isHostOrCoHost(socket.id, room)) return;
     const w = room.waitingRoom.get(targetSocketId); if (!w) return;
     room.waitingRoom.delete(targetSocketId);
-    const tSocket = io.sockets.sockets.get(targetSocketId);
-    if (tSocket) admitUser(tSocket, room, roomId, w.name, w.userId);
+    const ts = io.sockets.sockets.get(targetSocketId);
+    if (ts) admitUser(ts, room, roomId, w.name, w.userId);
     notifyWaitingUpdate(room);
   });
 
@@ -144,8 +293,8 @@ io.on('connection', (socket) => {
     if (!room || !isHostOrCoHost(socket.id, room)) return;
     if (targetSocketId === room.hostSocketId) return;
     io.to(targetSocketId).emit('zoom:kicked');
-    const tSocket = io.sockets.sockets.get(targetSocketId);
-    if (tSocket) handleUserLeave(tSocket, roomId);
+    const ts = io.sockets.sockets.get(targetSocketId);
+    if (ts) handleUserLeave(ts, roomId);
   });
 
   socket.on('zoom:assign-cohost', ({ roomId, targetSocketId }) => {
@@ -180,12 +329,18 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('zoom:permissions-changed', { permissions: room.permissions });
   });
 
+  socket.on('zoom:update-meeting-settings', ({ roomId, settings }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || socket.id !== room.hostSocketId) return;
+    room.settings = { ...room.settings, ...settings };
+    io.to(roomId).emit('zoom:settings-updated', { settings: room.settings });
+  });
+
   socket.on('zoom:chat-message', ({ roomId, text }) => {
     const room = zoomRooms.get(roomId); if (!room) return;
     const user = room.users.get(socket.id); if (!user) return;
     if (room.chatMode === 'host-only' && !isHostOrCoHost(socket.id, room)) return;
-    const msg = { from: user.name, text, ts: Date.now(), fromSocketId: socket.id };
-    io.to(roomId).emit('zoom:chat-message', msg);
+    io.to(roomId).emit('zoom:chat-message', { from: user.name, text, ts: Date.now(), fromSocketId: socket.id });
   });
 
   socket.on('zoom:set-chat-mode', ({ roomId, mode }) => {
@@ -205,28 +360,17 @@ io.on('connection', (socket) => {
     const room = zoomRooms.get(roomId);
     if (!room || socket.id !== room.hostSocketId) return;
     io.to(roomId).emit('zoom:meeting-ended', { reason: 'host' });
+    if (room.timer && room.timer.timeout) clearTimeout(room.timer.timeout);
+    if (room.breakout && room.breakout.timer) clearTimeout(room.breakout.timer);
     zoomRooms.delete(roomId); broadcastRooms();
+    Meeting.findOneAndUpdate({ roomId }, { status: 'ended' }).catch(() => {});
   });
 
   socket.on('zoom:admin-close', ({ roomId }) => {
     const room = zoomRooms.get(roomId); if (!room) return;
     io.to(roomId).emit('zoom:meeting-ended', { reason: 'admin' });
+    if (room.timer && room.timer.timeout) clearTimeout(room.timer.timeout);
     zoomRooms.delete(roomId); broadcastRooms();
-  });
-
-  socket.on('zoom:set-create-permission', ({ permission }) => {
-    zoomCreatePermission = permission;
-    io.emit('zoom:create-permission', { permission });
-  });
-
-  socket.on('zoom:get-rooms', () => {
-    const list = [];
-    zoomRooms.forEach((r, id) => list.push({ roomId: id, name: r.name, participants: r.users.size }));
-    socket.emit('zoom:rooms-list', list);
-  });
-
-  socket.on('zoom:get-create-permission', () => {
-    socket.emit('zoom:create-permission', { permission: zoomCreatePermission });
   });
 
   socket.on('zoom:screen-share-started', ({ roomId }) => {
@@ -241,629 +385,378 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('zoom:screen-share-stopped', { socketId: socket.id });
   });
 
-  // WebRTC Signaling
-  socket.on('zoom:offer', ({ targetSocketId, offer, fromName }) => {
-    io.to(targetSocketId).emit('zoom:offer', { fromSocketId: socket.id, fromName, offer });
+  socket.on('zoom:media-state', ({ roomId, audioOn, videoOn }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    const user = room.users.get(socket.id); if (!user) return;
+    user.audioOn = audioOn; user.videoOn = videoOn;
+    io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
   });
-  socket.on('zoom:answer', ({ targetSocketId, answer }) => {
-    io.to(targetSocketId).emit('zoom:answer', { fromSocketId: socket.id, answer });
-  });
-  socket.on('zoom:ice-candidate', ({ targetSocketId, candidate }) => {
-    io.to(targetSocketId).emit('zoom:ice-candidate', { fromSocketId: socket.id, candidate });
-  });
+
+  socket.on('zoom:offer',         ({ targetSocketId, offer, fromName }) => io.to(targetSocketId).emit('zoom:offer',         { fromSocketId: socket.id, fromName, offer }));
+  socket.on('zoom:answer',        ({ targetSocketId, answer })          => io.to(targetSocketId).emit('zoom:answer',        { fromSocketId: socket.id, answer }));
+  socket.on('zoom:ice-candidate', ({ targetSocketId, candidate })       => io.to(targetSocketId).emit('zoom:ice-candidate', { fromSocketId: socket.id, candidate }));
 
   socket.on('zoom:leave-room', ({ roomId }) => handleUserLeave(socket, roomId));
   socket.on('disconnect', () => {
-    zoomRooms.forEach((_, roomId) => {
-      const room = zoomRooms.get(roomId);
-      if (room && (room.users.has(socket.id) || room.waitingRoom.has(socket.id)))
-        handleUserLeave(socket, roomId);
+    zoomRooms.forEach((room, roomId) => {
+      if (room.users.has(socket.id) || room.waitingRoom.has(socket.id)) handleUserLeave(socket, roomId);
     });
   });
-});
-// --- End Zoom ---
 
-// Middleware
+  // ── Breakout Rooms ───────────────────────────────────────────────────────
+  socket.on('zoom:create-breakout-rooms', ({ roomId, count }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.breakout = { active: false, rooms: new Map(), timer: null };
+    for (let i = 1; i <= Math.min(count, 50); i++) room.breakout.rooms.set(`br-${i}`, { name: `חדר ${i}`, participants: new Set() });
+    socket.emit('zoom:breakout-rooms-created', { rooms: breakoutToArray(room.breakout.rooms), participants: getParticipants(room) });
+  });
+
+  socket.on('zoom:assign-breakout', ({ roomId, targetSocketId, brId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.breakout.rooms.forEach(br => br.participants.delete(targetSocketId));
+    const br = room.breakout.rooms.get(brId);
+    if (br) br.participants.add(targetSocketId);
+    socket.emit('zoom:breakout-rooms-updated', { rooms: breakoutToArray(room.breakout.rooms) });
+  });
+
+  socket.on('zoom:random-assign-breakout', ({ roomId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const participants = Array.from(room.users.keys()).filter(sid => sid !== room.hostSocketId);
+    for (let i = participants.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [participants[i], participants[j]] = [participants[j], participants[i]];
+    }
+    const keys = Array.from(room.breakout.rooms.keys());
+    room.breakout.rooms.forEach(br => br.participants.clear());
+    participants.forEach((sid, idx) => room.breakout.rooms.get(keys[idx % keys.length]).participants.add(sid));
+    socket.emit('zoom:breakout-rooms-updated', { rooms: breakoutToArray(room.breakout.rooms) });
+  });
+
+  socket.on('zoom:launch-breakout-rooms', ({ roomId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.breakout.active = true;
+    room.breakout.rooms.forEach((br, brId) => {
+      const peers = Array.from(br.participants).map(s => ({ socketId: s, name: room.users.get(s)?.name || 'משתתף' }));
+      br.participants.forEach(targetSid => {
+        io.to(targetSid).emit('zoom:move-to-breakout', {
+          brRoomId: `${roomId}__${brId}`, brName: br.name, mainRoomId: roomId,
+          peers: peers.filter(p => p.socketId !== targetSid)
+        });
+      });
+    });
+    socket.emit('zoom:breakout-launched', { rooms: breakoutToArray(room.breakout.rooms) });
+  });
+
+  socket.on('zoom:close-breakout-rooms', ({ roomId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (room.breakout.timer) { clearTimeout(room.breakout.timer); room.breakout.timer = null; }
+    closeBreakoutRooms(room, roomId);
+  });
+
+  socket.on('zoom:set-breakout-timer', ({ roomId, seconds }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (room.breakout.timer) clearTimeout(room.breakout.timer);
+    io.to(roomId).emit('zoom:breakout-timer-started', { seconds, endsAt: Date.now() + seconds * 1000 });
+    room.breakout.timer = setTimeout(() => closeBreakoutRooms(room, roomId), seconds * 1000);
+  });
+
+  socket.on('zoom:navigate-breakout', ({ roomId, brId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const br = room.breakout.rooms.get(brId); if (!br) return;
+    socket.emit('zoom:breakout-nav-response', {
+      brRoomId: `${roomId}__${brId}`, brName: br.name, mainRoomId: roomId,
+      peers: Array.from(br.participants).map(s => ({ socketId: s, name: room.users.get(s)?.name || 'משתתף' }))
+    });
+  });
+
+  // ── Polls ────────────────────────────────────────────────────────────────
+  socket.on('zoom:create-poll', ({ roomId, question, options }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const pollId = genId();
+    room.polls.set(pollId, { question, options, votes: new Map(), closed: false });
+    io.to(roomId).emit('zoom:poll-created', { id: pollId, question, options, counts: new Array(options.length).fill(0), totalVotes: 0, closed: false });
+  });
+
+  socket.on('zoom:vote-poll', ({ roomId, pollId, optionIndex }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    const poll = room.polls.get(pollId); if (!poll || poll.closed) return;
+    poll.votes.set(socket.id, optionIndex);
+    const counts = new Array(poll.options.length).fill(0);
+    poll.votes.forEach(idx => counts[idx]++);
+    io.to(roomId).emit('zoom:poll-updated', { id: pollId, counts, totalVotes: poll.votes.size });
+  });
+
+  socket.on('zoom:close-poll', ({ roomId, pollId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const poll = room.polls.get(pollId); if (!poll) return;
+    poll.closed = true;
+    const counts = new Array(poll.options.length).fill(0);
+    poll.votes.forEach(idx => counts[idx]++);
+    io.to(roomId).emit('zoom:poll-closed', { id: pollId, counts, totalVotes: poll.votes.size });
+  });
+
+  socket.on('zoom:delete-poll', ({ roomId, pollId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.polls.delete(pollId);
+    io.to(roomId).emit('zoom:poll-deleted', { id: pollId });
+  });
+
+  // ── Q&A ─────────────────────────────────────────────────────────────────
+  socket.on('zoom:set-qa', ({ roomId, enabled, requireApproval }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.qa.enabled = enabled;
+    if (requireApproval !== undefined) room.qa.requireApproval = requireApproval;
+    if (!enabled) room.qa.questions = [];
+    io.to(roomId).emit('zoom:qa-state', { enabled, requireApproval: room.qa.requireApproval, questions: enabled ? room.qa.questions.filter(q => q.approved) : [] });
+  });
+
+  socket.on('zoom:submit-question', ({ roomId, question }) => {
+    const room = zoomRooms.get(roomId); if (!room || !room.qa.enabled) return;
+    const user = room.users.get(socket.id); if (!user) return;
+    const q = { id: genId(), question, authorName: user.name, authorSocketId: socket.id, approved: !room.qa.requireApproval, submittedAt: Date.now() };
+    room.qa.questions.push(q);
+    if (room.qa.requireApproval) {
+      const targets = [room.hostSocketId, ...Array.from(room.users.entries()).filter(([, u]) => u.isCoHost).map(([s]) => s)];
+      targets.forEach(sid => io.to(sid).emit('zoom:question-pending', { question: q }));
+      socket.emit('zoom:question-submitted', { pending: true });
+    } else {
+      io.to(roomId).emit('zoom:question-published', { question: q });
+    }
+  });
+
+  socket.on('zoom:approve-question', ({ roomId, questionId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const q = room.qa.questions.find(q => q.id === questionId); if (!q) return;
+    q.approved = true;
+    io.to(roomId).emit('zoom:question-published', { question: q });
+  });
+
+  socket.on('zoom:reject-question', ({ roomId, questionId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.qa.questions = room.qa.questions.filter(q => q.id !== questionId);
+    socket.emit('zoom:question-rejected', { questionId });
+  });
+
+  // ── Countdown Timer ──────────────────────────────────────────────────────
+  socket.on('zoom:start-timer', ({ roomId, seconds }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (room.timer.timeout) clearTimeout(room.timer.timeout);
+    const endTime = Date.now() + seconds * 1000;
+    room.timer = { active: true, endTime, timeout: null };
+    io.to(roomId).emit('zoom:timer-started', { seconds, endTime });
+    room.timer.timeout = setTimeout(() => {
+      room.timer.active = false; room.timer.timeout = null;
+      io.to(roomId).emit('zoom:timer-ended');
+    }, seconds * 1000);
+  });
+
+  socket.on('zoom:cancel-timer', ({ roomId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (room.timer.timeout) { clearTimeout(room.timer.timeout); room.timer.timeout = null; }
+    room.timer.active = false;
+    io.to(roomId).emit('zoom:timer-cancelled');
+  });
+});
+
+// ── Middleware & Routes ──────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
-
-// הגדרת העלאת קבצים (Multer)
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, uploadDir)
-    },
-    filename: function (req, file, cb) {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        // תמיכה בשמות קבצים בעברית
-        const cleanName = file.originalname.replace(/[^a-zA-Z0-9.א-ת\-\_]/g, '_');
-        cb(null, uniqueSuffix + '-' + cleanName);
-    }
-});
-
-// הגדלת המגבלה ל-100MB
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 100 * 1024 * 1024 } 
-});
-
-// חשיפת קבצים סטטיים
 app.use(express.static(path.join(__dirname, '..', 'client')));
-app.use('/css', express.static(path.join(__dirname, '..', 'client', 'css')));
-app.use('/js', express.static(path.join(__dirname, '..', 'client', 'js')));
-app.use('/uploads', express.static(uploadDir));
-
-
-// חיבור ל-MongoDB
-const MONGODB_URI = process.env.MONGODB_URI;
-
-console.log('🔗 Connecting to MongoDB...');
-
-// סכמות MongoDB
-const userSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, enum: ['student', 'teacher', 'admin'], required: true },
-  classes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Class' }],
-  createdAt: { type: Date, default: Date.now }
-});
-
-const classSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  teachers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  students: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  maxStudents: { type: Number, default: 20 },
-  createdAt: { type: Date, default: Date.now }
-});
-
-const announcementSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  content: { type: String, required: true },
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  isGlobal: { type: Boolean, default: false },
-  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class' },
-  createdAt: { type: Date, default: Date.now }
-});
-
-const assignmentSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  class: { type: mongoose.Schema.Types.ObjectId, ref: 'Class', required: true },
-  teacher: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  dueDate: { type: Date, required: true },
-  submissions: [{
-    student: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    submission: String,
-    fileUrl: String,
-    submittedAt: { type: Date, default: Date.now },
-    grade: String
-  }],
-  createdAt: { type: Date, default: Date.now }
-});
-
-const eventSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  description: { type: String, required: true },
-  date: { type: Date, required: true },
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  createdAt: { type: Date, default: Date.now }
-});
-
-// הסרת ה-enum מ-type כדי לאפשר כל סוג קובץ
-const mediaSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  type: { type: String, required: true }, 
-  url: { type: String, required: true },
-  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  date: { type: Date, default: Date.now }, 
-  createdAt: { type: Date, default: Date.now }
-});
-
-// מודלים
-const User = mongoose.model('User', userSchema);
-const Class = mongoose.model('Class', classSchema);
-const Announcement = mongoose.model('Announcement', announcementSchema);
-const Assignment = mongoose.model('Assignment', assignmentSchema);
-const Event = mongoose.model('Event', eventSchema);
-const Media = mongoose.model('Media', mediaSchema);
-
-// יצירת משתמש מנהל ברירת מחדל
-async function createDefaultUsers() {
-  try {
-    const existingAdmin = await User.findOne({ email: 'yairfrish2@gmail.com' });
-    if (!existingAdmin) {
-      const hashedPassword = await bcrypt.hash('yair12345', 10);
-      const adminUser = new User({
-        name: 'יאיר פריש',
-        email: 'yairfrish2@gmail.com',
-        password: hashedPassword,
-        role: 'admin',
-        classes: [],
-        createdAt: new Date()
-      });
-      await adminUser.save();
-      console.log('✅ Default admin user created');
-    }
-  } catch (error) {
-    console.error('❌ Error creating default users:', error);
-  }
-}
-
-mongoose.connect(MONGODB_URI)
-  .then(() => {
-    console.log('✅ Connected to MongoDB');
-    createDefaultUsers();
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
-    console.error('⚠️ Server will continue running but database operations will fail');
-  });
 
 const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) return res.status(401).json({ error: 'Access token required' });
-
+  const token = req.headers['authorization']?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token required' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.userId).select('-password');
-    if (!user) return res.status(403).json({ error: 'User not found' });
-
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role
-    };
+    req.user = { userId: decoded.userId, email: decoded.email, role: decoded.role };
     next();
-  } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
-  }
+  } catch { return res.status(403).json({ error: 'Invalid token' }); }
 };
 
-// --- Routes ---
+const isAdmin = (req, res, next) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+  next();
+};
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
-});
+app.get('/api/health', (req, res) => res.json({ ok: true }));
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
-    if (!name || !email || !password || !role) return res.status(400).json({ error: 'All fields are required' });
-
-    const existingUser = await User.findOne({ email });
-    if (existingUser) return res.status(400).json({ error: 'User already exists' });
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    // ✅ ביטול שיוך אוטומטי לכיתה - משתמש חדש נוצר ללא כיתות
-    const user = new User({ name, email, password: hashedPassword, role, classes: [] });
-    await user.save();
-
-    const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
-    res.json({ message: 'User created', token, user: { id: user._id, name, email, role } });
-  } catch (error) {
-    res.status(500).json({ error: 'Error registering user' });
-  }
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) return res.status(400).json({ error: 'כל השדות נדרשים' });
+    if (await User.findOne({ email })) return res.status(400).json({ error: 'האימייל כבר קיים במערכת' });
+    const user = await new User({ name, email, password: await bcrypt.hash(password, 10) }).save();
+    const token = jwt.sign({ userId: user._id, email, role: user.role }, JWT_SECRET);
+    res.json({ token, user: { id: user._id, name, email, role: user.role } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
-
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ error: 'Invalid email or password' });
-
-    if (!user.password) return res.status(500).json({ error: 'User data corrupted' });
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) return res.status(400).json({ error: 'Invalid email or password' });
-
-    const token = jwt.sign({ userId: user._id, email: user.email, role: user.role }, JWT_SECRET);
-    res.json({ message: 'Login successful', token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
-
-  } catch (error) {
-    console.error('🔥 Login Critical Error:', error);
-    res.status(500).json({ error: 'Internal server error: ' + error.message });
-  }
+    if (!user || !await bcrypt.compare(password, user.password)) return res.status(400).json({ error: 'אימייל או סיסמה שגויים' });
+    const token = jwt.sign({ userId: user._id, email, role: user.role }, JWT_SECRET);
+    res.json({ token, user: { id: user._id, name: user.name, email, role: user.role } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/validate-token', authenticateToken, async (req, res) => {
+app.get('/api/auth/validate', authenticateToken, async (req, res) => {
+  const user = await User.findById(req.user.userId).select('-password');
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  res.json({ id: user._id, name: user.name, email: user.email, role: user.role });
+});
+
+app.put('/api/auth/profile', authenticateToken, async (req, res) => {
   try {
-    const user = await User.findById(req.user.userId).select('-password');
+    const { name, currentPassword, newPassword } = req.body;
+    const user = await User.findById(req.user.userId);
+    if (name) user.name = name;
+    if (newPassword) {
+      if (!currentPassword || !await bcrypt.compare(currentPassword, user.password))
+        return res.status(400).json({ error: 'הסיסמה הנוכחית שגויה' });
+      user.password = await bcrypt.hash(newPassword, 10);
+    }
+    await user.save();
     res.json({ id: user._id, name: user.name, email: user.email, role: user.role });
-  } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/auth/account', authenticateToken, async (req, res) => {
+  await User.findByIdAndDelete(req.user.userId);
+  await Meeting.deleteMany({ hostId: req.user.userId });
+  res.json({ message: 'החשבון נמחק' });
+});
+
+app.get('/api/users/search', authenticateToken, async (req, res) => {
+  const q = req.query.q || '';
+  const users = await User.find({ name: { $regex: q, $options: 'i' } }).select('_id name').limit(10);
+  res.json(users);
+});
+
+app.get('/api/meetings', authenticateToken, async (req, res) => {
+  const meetings = await Meeting.find({ hostId: req.user.userId, status: { $ne: 'ended' } }).sort({ createdAt: -1 });
+  res.json(meetings);
+});
+
+app.post('/api/meetings', authenticateToken, async (req, res) => {
+  try {
+    const { title, type, scheduledAt, settings } = req.body;
+    const sysSettings = await SystemSettings.findOne({ key: 'main' });
+    if (sysSettings && sysSettings.lockMeetingCreation && req.user.role !== 'admin')
+      return res.status(403).json({ error: 'יצירת פגישות נעולה על ידי מנהל המערכת' });
+    const hostUser = await User.findById(req.user.userId);
+    const roomId = 'perm-' + genId();
+    const meeting = await new Meeting({
+      title, hostId: req.user.userId, hostName: hostUser.name,
+      type, scheduledAt, roomId,
+      settings: settings || { requireAdminApproval: false, allowEntryBeforeHost: false }
+    }).save();
+    res.json(meeting);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/meetings/:id', authenticateToken, async (req, res) => {
+  const meeting = await Meeting.findById(req.params.id);
+  if (!meeting) return res.status(404).json({ error: 'Not found' });
+  if (meeting.hostId.toString() !== req.user.userId && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Access denied' });
+  await Meeting.findByIdAndDelete(req.params.id);
+  res.json({ message: 'Deleted' });
+});
+
+app.get('/api/meetings/by-room/:roomId', async (req, res) => {
+  const meeting = await Meeting.findOne({ roomId: req.params.roomId });
+  if (!meeting) return res.json(null);
+  res.json({ title: meeting.title, hostName: meeting.hostName, type: meeting.type });
+});
+
+app.get('/api/admin/users', authenticateToken, isAdmin, async (req, res) => {
+  const users = await User.find().select('-password').sort({ createdAt: -1 });
+  res.json(users);
+});
+
+app.put('/api/admin/users/:id', authenticateToken, isAdmin, async (req, res) => {
+  const { name, email, role, password } = req.body;
+  const update = {};
+  if (name) update.name = name;
+  if (email) update.email = email;
+  if (role) update.role = role;
+  if (password) update.password = await bcrypt.hash(password, 10);
+  const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
+  res.json(user);
+});
+
+app.delete('/api/admin/users/:id', authenticateToken, isAdmin, async (req, res) => {
+  if (req.params.id === req.user.userId) return res.status(400).json({ error: 'לא ניתן למחוק את עצמך' });
+  await User.findByIdAndDelete(req.params.id);
+  await Meeting.deleteMany({ hostId: req.params.id });
+  res.json({ message: 'Deleted' });
+});
+
+app.get('/api/admin/meetings/active', authenticateToken, isAdmin, async (req, res) => {
+  const active = [];
+  zoomRooms.forEach((r, id) => { if (!r._empty) active.push({ roomId: id, name: r.name, participants: r.users.size }); });
+  res.json(active);
+});
+
+app.post('/api/admin/meetings/:roomId/close', authenticateToken, isAdmin, async (req, res) => {
+  const room = zoomRooms.get(req.params.roomId);
+  if (room) {
+    io.to(req.params.roomId).emit('zoom:meeting-ended', { reason: 'admin' });
+    if (room.timer && room.timer.timeout) clearTimeout(room.timer.timeout);
+    zoomRooms.delete(req.params.roomId);
+    broadcastRooms();
   }
+  res.json({ message: 'Closed' });
 });
 
-app.post('/api/change-password', authenticateToken, async (req, res) => {
-    try {
-      const { newPassword } = req.body;
-      if (!newPassword) return res.status(400).json({ error: 'New password is required' });
-  
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      await User.findByIdAndUpdate(req.user.userId, { password: hashedPassword });
-      res.json({ message: 'Password changed successfully' });
-    } catch (error) {
-      res.status(500).json({ error: 'Internal server error' });
+app.get('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {
+  const settings = await SystemSettings.findOneAndUpdate({ key: 'main' }, {}, { upsert: true, new: true });
+  res.json(settings);
+});
+
+app.put('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {
+  const settings = await SystemSettings.findOneAndUpdate({ key: 'main' }, req.body, { new: true, upsert: true });
+  res.json(settings);
+});
+
+mongoose.connect(process.env.MONGODB_URI)
+  .then(async () => {
+    console.log('✅ MongoDB connected');
+    await createDefaultUsers();
+    await SystemSettings.findOneAndUpdate({ key: 'main' }, {}, { upsert: true, new: true });
+  })
+  .catch(err => console.error('❌ MongoDB error:', err));
+
+async function createDefaultUsers() {
+  const admins = [
+    { name: 'יאיר פריש', email: 'yairfrish2@gmail.com', password: 'yair12345' },
+    { name: 'יאיר פרץ',  email: 'przyyryair@gmail.com',  password: 'yair2589'  }
+  ];
+  for (const a of admins) {
+    if (!await User.findOne({ email: a.email })) {
+      await new User({ name: a.name, email: a.email, password: await bcrypt.hash(a.password, 10), role: 'admin' }).save();
+      console.log(`✅ Admin created: ${a.name}`);
     }
-});
+  }
+}
 
-// Users
-app.get('/api/users', authenticateToken, async (req, res) => {
-    // ✅ שינוי: מאפשר גם למורים לגשת (כדי לבחור תלמידים להוספה לכיתה)
-    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
-        return res.status(403).json({ error: 'Access denied' });
-    }
-    const users = await User.find().select('-password');
-    res.json(users);
-});
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'index.html')));
 
-app.post('/api/users', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    try {
-        const { name, email, password, role } = req.body;
-        const hashedPassword = await bcrypt.hash(password, 10);
-        // ✅ ביטול שיוך אוטומטי לכיתה - משתמש חדש נוצר ללא כיתות
-        const user = new User({ name, email, password: hashedPassword, role, classes: [] });
-        await user.save();
-        res.json({ message: 'User created' });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.put('/api/users/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    try {
-        const { name, email, role, password } = req.body;
-        const updateData = { name, email, role };
-        if (password) updateData.password = await bcrypt.hash(password, 10);
-        
-        const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true });
-        res.json({ message: 'User updated', user });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/users/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    await User.findByIdAndDelete(req.params.id);
-    res.json({ message: 'User deleted' });
-});
-
-// Classes
-app.get('/api/classes', authenticateToken, async (req, res) => {
-    try {
-        // ✅ מורים ותלמידים רואים רק את הכיתות שלהם
-        let query = {};
-        
-        if (req.user.role === 'student') {
-            // תלמידים רואים רק כיתות שהם חברים בהן
-            query = { students: req.user.userId };
-        } else if (req.user.role === 'teacher') {
-            // מורים רואים רק כיתות שהם מלמדים בהן
-            query = { teachers: req.user.userId };
-        }
-        // אדמינים רואים את כל הכיתות (query ריק)
-        
-        const classes = await Class.find(query)
-          .populate('teacher', 'name email')
-          .populate('teachers', 'name email')
-          .populate('students', 'name email');
-        res.json(classes);
-    } catch (error) {
-        console.error('❌ Error fetching classes:', error);
-        res.status(500).json({ error: 'Failed to fetch classes', message: error.message });
-    }
-});
-
-app.post('/api/classes', authenticateToken, async (req, res) => {
-    try {
-        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-        
-        const { name, teachers } = req.body;
-        
-        if (!name) {
-            return res.status(400).json({ error: 'Class name is required' });
-        }
-        
-        // ✅ ביטול שיוך אוטומטי - כיתה חדשה נוצרת ללא תלמידים
-        const newClass = new Class({
-            name,
-            teacher: req.user.userId,
-            teachers: [req.user.userId, ...(teachers || [])],
-            students: [] // רשימה ריקה, המורים יוכלו להוסיף תלמידים ידנית
-        });
-        
-        await newClass.save();
-        
-        const populatedClass = await Class.findById(newClass._id)
-            .populate('teacher', 'name email')
-            .populate('teachers', 'name email')
-            .populate('students', 'name email');
-        
-        res.json(populatedClass);
-    } catch (error) {
-        console.error('❌ Error creating class:', error);
-        res.status(500).json({ error: 'Failed to create class', message: error.message });
-    }
-});
-
-app.put('/api/classes/:id', authenticateToken, async (req, res) => {
-    try {
-        const classToUpdate = await Class.findById(req.params.id);
-        if (!classToUpdate) return res.status(404).json({ error: 'Class not found' });
-
-        // ✅ שינוי: מאפשר למורה של הכיתה לערוך אותה (להוסיף/להסיר תלמידים)
-        const isClassTeacher = req.user.role === 'teacher' && (
-            classToUpdate.teacher.toString() === req.user.userId || 
-            classToUpdate.teachers.map(t => t.toString()).includes(req.user.userId)
-        );
-
-        if (req.user.role !== 'admin' && !isClassTeacher) {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-
-        const { name, teachers, students } = req.body;
-        
-        if (name) classToUpdate.name = name;
-        if (teachers) classToUpdate.teachers = teachers;
-        if (students) classToUpdate.students = students;
-
-        await classToUpdate.save();
-        
-        const populatedClass = await Class.findById(req.params.id)
-            .populate('teacher', 'name email')
-            .populate('teachers', 'name email')
-            .populate('students', 'name email');
-
-        res.json(populatedClass);
-    } catch (e) { 
-        res.status(500).json({ error: e.message }); 
-    }
-});
-
-app.delete('/api/classes/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    await Class.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Class deleted' });
-});
-
-// Class specific data
-app.get('/api/classes/:id/assignments', authenticateToken, async (req, res) => {
-    const assignments = await Assignment.find({ class: req.params.id }).populate('class teacher');
-    res.json(assignments);
-});
-
-app.get('/api/classes/:id/announcements', authenticateToken, async (req, res) => {
-    const announcements = await Announcement.find({ 
-        $or: [{ class: req.params.id }, { isGlobal: true }]
-    }).populate('author class').sort({ createdAt: -1 });
-    res.json(announcements);
-});
-
-// Announcements
-app.get('/api/announcements', async (req, res) => {
-    try {
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
-        let query = { isGlobal: true };
-
-        // שליפת הודעות רלוונטיות למשתמש (כלליות + כיתות שלו)
-        if (token) {
-            try {
-                const decoded = jwt.verify(token, JWT_SECRET);
-                const userId = decoded.userId;
-                const userClasses = await Class.find({
-                    $or: [{ students: userId }, { teachers: userId }, { teacher: userId }]
-                }).select('_id');
-                const classIds = userClasses.map(c => c._id);
-                query = { $or: [{ isGlobal: true }, { class: { $in: classIds } }] };
-            } catch (e) {}
-        }
-
-        const announcements = await Announcement.find(query)
-            .populate('author', 'name')
-            .populate('class', 'name')
-            .sort({ createdAt: -1 });
-        res.json(announcements);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/announcements', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    const { title, content, isGlobal, classId } = req.body;
-    const announcement = new Announcement({
-        title, content, author: req.user.userId, isGlobal: isGlobal || false, class: classId || null
-    });
-    await announcement.save();
-    res.json(announcement);
-});
-
-app.delete('/api/announcements/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    await Announcement.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Deleted' });
-});
-
-// Assignments
-app.get('/api/assignments', authenticateToken, async (req, res) => {
-    try {
-        let assignments;
-        if (req.user.role === 'student') {
-            const studentClasses = await Class.find({ students: req.user.userId });
-            const classIds = studentClasses.map(c => c._id);
-            assignments = classIds.length === 0 ? [] : await Assignment.find({ class: { $in: classIds } }).populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
-        } else {
-            assignments = await Assignment.find().populate('class', 'name').populate('teacher', 'name').sort({ dueDate: 1 });
-        }
-        res.json(assignments);
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-app.post('/api/assignments', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    const { title, description, classId, dueDate } = req.body;
-    const assignment = new Assignment({
-        title, description, class: classId, teacher: req.user.userId, dueDate, submissions: []
-    });
-    await assignment.save();
-    res.json(assignment);
-});
-
-app.post('/api/assignments/submit', authenticateToken, upload.single('file'), async (req, res) => {
-    try {
-        const { assignmentId, submission } = req.body;
-        const assignment = await Assignment.findById(assignmentId);
-        if (!assignment) return res.status(404).json({ error: 'Assignment not found' });
-
-        let fileUrl = null;
-        if (req.file) {
-            fileUrl = `/uploads/${req.file.filename}`;
-        }
-
-        const existingSubIndex = assignment.submissions.findIndex(s => s.student.toString() === req.user.userId);
-        
-        const newSubmission = {
-            student: req.user.userId,
-            submission: submission || '',
-            fileUrl: fileUrl, 
-            submittedAt: new Date()
-        };
-
-        if (existingSubIndex > -1) {
-            if (!fileUrl && assignment.submissions[existingSubIndex].fileUrl) {
-                newSubmission.fileUrl = assignment.submissions[existingSubIndex].fileUrl;
-            }
-            assignment.submissions[existingSubIndex] = { ...assignment.submissions[existingSubIndex], ...newSubmission };
-        } else {
-            assignment.submissions.push(newSubmission);
-        }
-
-        await assignment.save();
-        res.json({ message: 'Submitted successfully' });
-    } catch (error) {
-        res.status(500).json({ error: 'Error submitting assignment' });
-    }
-});
-
-app.put('/api/assignments/:id', authenticateToken, async (req, res) => {
-    const { title, description, dueDate } = req.body;
-    const assignment = await Assignment.findById(req.params.id);
-    if (!assignment) return res.status(404).json({ error: 'Not found' });
-    if (req.user.role !== 'admin' && assignment.teacher.toString() !== req.user.userId) return res.status(403).json({ error: 'Denied' });
-    
-    const updated = await Assignment.findByIdAndUpdate(req.params.id, { title, description, dueDate }, { new: true });
-    res.json(updated);
-});
-
-app.delete('/api/assignments/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    await Assignment.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Deleted' });
-});
-
-app.get('/api/assignments/:id/submissions', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    const assignment = await Assignment.findById(req.params.id).populate('submissions.student', 'name email');
-    res.json(assignment.submissions);
-});
-
-app.post('/api/assignments/grade', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    const { assignmentId, studentId, grade } = req.body;
-    const assignment = await Assignment.findById(assignmentId);
-    const sub = assignment.submissions.find(s => s.student.toString() === studentId);
-    if (sub) {
-        sub.grade = grade;
-        await assignment.save();
-        res.json({ message: 'Graded' });
-    } else {
-        res.status(404).json({ error: 'Submission not found' });
-    }
-});
-
-// Events
-app.get('/api/events', async (req, res) => {
-    const events = await Event.find().populate('author', 'name').sort({ date: 1 });
-    res.json(events);
-});
-
-app.post('/api/events', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    const { title, description, date } = req.body;
-    const event = new Event({ title, description, date, author: req.user.userId });
-    await event.save();
-    res.json(event);
-});
-
-app.delete('/api/events/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'teacher' && req.user.role !== 'admin') return res.status(403).json({ error: 'Access denied' });
-    await Event.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Deleted' });
-});
-
-// Media
-app.get('/api/media', async (req, res) => {
-    const media = await Media.find().populate('author', 'name').sort({ createdAt: -1 });
-    res.json(media);
-});
-
-app.post('/api/media', authenticateToken, upload.single('file'), async (req, res) => {
-    try {
-        if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Access denied' });
-        }
-        if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded' });
-        }
-
-        const { title, type, date } = req.body;
-        const fileUrl = `/uploads/${req.file.filename}`;
-        const mediaDate = date || new Date(); 
-
-        const media = new Media({ 
-            title: title || 'ללא כותרת', 
-            type: type || 'file', 
-            url: fileUrl, 
-            date: mediaDate, 
-            author: req.user.userId 
-        });
-        
-        await media.save();
-        res.json(media);
-    } catch (error) {
-        res.status(500).json({ error: 'Error uploading media: ' + error.message });
-    }
-});
-
-app.delete('/api/media/:id', authenticateToken, async (req, res) => {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-    await Media.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Deleted' });
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
-});
-
-app.use((error, req, res, next) => {
-  console.error('🔥 Unhandled error:', error);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+httpServer.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server on port ${PORT}`));

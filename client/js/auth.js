@@ -1,152 +1,87 @@
-// Authentication Manager for MongoDB backend
 class AuthManager {
-    constructor() {
-        this.currentUser = null;
-        this.token = localStorage.getItem('token');
-        this.init();
-    }
+  constructor() {
+    this.currentUser = null;
+    this.token = localStorage.getItem('token');
+  }
 
-    async init() {
-        if (this.token) {
-            await this.validateToken();
-        }
-        console.log('🔐 Auth Manager initialized');
-        
-        // Update UI after initialization
-        if (typeof updateUI === 'function') {
-            setTimeout(updateUI, 100);
-        }
-    }
-
-    async validateToken() {
-        try {
-            const response = await fetch('/api/validate-token', {
-                headers: {
-                    'Authorization': `Bearer ${this.token}`
-                }
-            });
-
-            if (response.ok) {
-                const userData = await response.json();
-                this.currentUser = userData;
-                console.log('✅ User validated:', userData.name);
-                
-                // Update UI after validation
-                if (typeof updateUI === 'function') {
-                    updateUI();
-                }
-                return true;
-            } else {
-                this.logout();
-                return false;
-            }
-        } catch (error) {
-            console.error('Token validation error:', error);
-            this.logout();
-            return false;
-        }
-    }
-
-    async login(email, password) {
-        try {
-            const response = await fetch('/api/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ email, password })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                this.token = data.token;
-                this.currentUser = data.user;
-                localStorage.setItem('token', this.token);
-                console.log('✅ Login successful:', data.user.name);
-                
-                // Update UI after successful login
-                if (typeof updateUI === 'function') {
-                    updateUI();
-                }
-                return { success: true, user: this.currentUser };
-            } else {
-                return { success: false, error: data.error };
-            }
-        } catch (error) {
-            return { success: false, error: 'Network error' };
-        }
-    }
-
-    async register(userData) {
-        try {
-            const response = await fetch('/api/register', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(userData)
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                this.token = data.token;
-                this.currentUser = data.user;
-                localStorage.setItem('token', this.token);
-                console.log('✅ Registration successful:', data.user.name);
-                
-                // Update UI after successful registration
-                if (typeof updateUI === 'function') {
-                    updateUI();
-                }
-                return { success: true, user: this.currentUser };
-            } else {
-                return { success: false, error: data.error };
-            }
-        } catch (error) {
-            return { success: false, error: 'Network error' };
-        }
-    }
-
-    async logout() {
-        this.currentUser = null;
+  async init() {
+    if (!this.token) return;
+    try {
+      const res = await fetch('/api/auth/validate', { headers: this.authHeaders() });
+      if (res.ok) {
+        this.currentUser = await res.json();
+      } else {
         this.token = null;
         localStorage.removeItem('token');
-        console.log('✅ User logged out');
-        
-        // Update UI after logout
-        if (typeof updateUI === 'function') {
-            updateUI();
-        }
-        return { success: true };
-    }
+      }
+    } catch { this.token = null; }
+  }
 
-    getAuthHeaders() {
-        if (this.token) {
-            return {
-                'Authorization': `Bearer ${this.token}`,
-                'Content-Type': 'application/json'
-            };
-        }
-        return { 'Content-Type': 'application/json' };
-    }
+  isLoggedIn() { return !!this.currentUser; }
+  isAdmin() { return this.currentUser && this.currentUser.role === 'admin'; }
 
-    isAdmin() {
-        return this.currentUser && this.currentUser.role === 'admin';
-    }
+  authHeaders() {
+    return this.token ? { 'Authorization': 'Bearer ' + this.token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+  }
 
-    isTeacher() {
-        return this.currentUser && (this.currentUser.role === 'teacher' || this.currentUser.role === 'admin');
-    }
+  async login() {
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    if (!email || !password) { errEl.textContent = 'יש למלא את כל השדות'; return; }
+    try {
+      const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.error || 'שגיאה בכניסה'; return; }
+      this.token = data.token;
+      this.currentUser = data.user;
+      localStorage.setItem('token', data.token);
+      onAuthSuccess();
+    } catch { errEl.textContent = 'שגיאת רשת'; }
+  }
 
-    isStudent() {
-        return this.currentUser && this.currentUser.role === 'student';
-    }
+  async register() {
+    const name = document.getElementById('reg-name').value.trim();
+    const email = document.getElementById('reg-email').value.trim();
+    const password = document.getElementById('reg-password').value;
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    if (!name || !email || !password) { errEl.textContent = 'יש למלא את כל השדות'; return; }
+    try {
+      const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.error || 'שגיאה בהרשמה'; return; }
+      this.token = data.token;
+      this.currentUser = data.user;
+      localStorage.setItem('token', data.token);
+      onAuthSuccess();
+    } catch { errEl.textContent = 'שגיאת רשת'; }
+  }
 
-    isAuthenticated() {
-        return this.currentUser !== null;
-    }
+  logout() {
+    this.token = null;
+    this.currentUser = null;
+    localStorage.removeItem('token');
+    if (window.zoomManager) window.zoomManager.fullReset();
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('page-auth').style.display = 'flex';
+  }
+
+  async updateProfile(data) {
+    const res = await fetch('/api/auth/profile', { method: 'PUT', headers: this.authHeaders(), body: JSON.stringify(data) });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error);
+    this.currentUser = result;
+    document.getElementById('header-username').textContent = result.name;
+    return result;
+  }
+
+  async deleteAccount() {
+    const res = await fetch('/api/auth/account', { method: 'DELETE', headers: this.authHeaders() });
+    if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+    this.logout();
+  }
 }
 
-const authManager = new AuthManager();
+window.authManager = new AuthManager();
