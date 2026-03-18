@@ -34,6 +34,8 @@ class ZoomManager {
         // Raised hands
         this.raisedHands = new Map();  // socketId -> name
         this.myHandRaised = false;
+        this.emojisEnabled = true;
+        this._waitingCount = 0;
 
         // Virtual background
         this.virtualBgType = 'none';   // 'none' | 'blur' | 'preset' | 'custom'
@@ -117,6 +119,9 @@ class ZoomManager {
         this.socket.on('zoom:hand-lowered',   d => this.onHandLowered(d));
         this.socket.on('zoom:all-hands-lowered', () => this.onAllHandsLowered());
         this.socket.on('zoom:hands-state',    d => d.hands.forEach(h => this.onHandRaised(h)));
+
+        // Emojis
+        this.socket.on('zoom:emojis-toggled', d => this.onEmojisToggled(d));
 
         // Polls
         this.socket.on('zoom:poll-created',  d => this.onPollReceived(d));
@@ -217,24 +222,27 @@ class ZoomManager {
     }
 
     // ── Room Events ───────────────────────────────────────────────────────────
-    onRoomCreated({ roomId, roomName, permissions }) {
+    onRoomCreated({ roomId, roomName, permissions, emojisEnabled }) {
         this.currentRoomId = roomId;
         this.mainRoomId = roomId;
         this.isHost = true;
         this.chatMode = 'everyone';
+        this.emojisEnabled = emojisEnabled !== false;
         this.roomPermissions = permissions || { allowMic: true, allowCamera: true, allowScreenShare: true };
         this.showCallUI(roomName);
         this.addLocalTile();
         this.updateHostControls();
         this.updatePermissionUI();
         this.updateRoomLink(roomId);
+        this._updateEmojiBtn();
     }
 
-    async onRoomJoined({ roomId, roomName, existingUsers, isHost, chatMode, permissions }) {
+    async onRoomJoined({ roomId, roomName, existingUsers, isHost, chatMode, permissions, emojisEnabled }) {
         this.currentRoomId = roomId;
         if (!this.mainRoomId) this.mainRoomId = roomId;
         this.isHost = isHost;
         this.chatMode = chatMode || 'everyone';
+        this.emojisEnabled = emojisEnabled !== false;
         this.roomPermissions = permissions || { allowMic: true, allowCamera: true, allowScreenShare: true };
         this.hideWaitingScreen();
         this.showCallUI(roomName);
@@ -242,6 +250,7 @@ class ZoomManager {
         this.updateHostControls();
         this.updateChatUI();
         this.enforcePermissions();
+        this._updateEmojiBtn();
         this.updateRoomLink(this.mainRoomId || roomId);
         for (const u of existingUsers) {
             this.addRemoteTilePlaceholder(u.socketId, u.name);
@@ -370,6 +379,13 @@ class ZoomManager {
         if (!el) return;
         const badge = document.getElementById('zoom-waiting-badge');
         if (badge) { badge.textContent = waitingList.length; badge.style.display = waitingList.length ? 'inline-flex' : 'none'; }
+        // Play sound + toast when someone new arrives
+        if (waitingList.length > this._waitingCount) {
+            const newUser = waitingList[waitingList.length - 1];
+            this._playKnockSound();
+            this._showToast('🔔 ' + newUser.name + ' מבקש/ת להצטרף');
+        }
+        this._waitingCount = waitingList.length;
         if (!waitingList.length) { el.innerHTML = '<p style="color:var(--gray);font-size:0.85rem;">אין ממתינים</p>'; return; }
         el.innerHTML = waitingList.map(w => `
             <div class="zoom-waiting-row">
@@ -641,7 +657,8 @@ class ZoomManager {
             this._showToast('המארח חסם את שיתוף המסך'); return;
         }
         try {
-            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true });
+            this._showToast('טיפ: סמן "שתף שמע מערכת" בחלון הדפדפן לשמע שיתוף מסך');
+            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: { echoCancellation: false, noiseSuppression: false } });
             const videoTrack = this.screenStream.getVideoTracks()[0];
             const audioTrack = this.screenStream.getAudioTracks()[0] || null;
             const replacePromises = [];
@@ -972,10 +989,15 @@ class ZoomManager {
         if (this.timerInterval) { clearInterval(this.timerInterval); this.timerInterval = null; }
         this.timerEndTime = null;
         this.raisedHands.clear(); this.myHandRaised = false;
+        this._waitingCount = 0; this.emojisEnabled = true;
         const helpBtn = document.getElementById('zoom-btn-help');
         if (helpBtn) helpBtn.style.display = 'none';
+        const returnBtn = document.getElementById('zoom-btn-return-main');
+        if (returnBtn) returnBtn.style.display = 'none';
         const raiseBtn = document.getElementById('zoom-btn-raise-hand');
         if (raiseBtn) raiseBtn.classList.remove('active');
+        const emojiPanel = document.getElementById('zoom-emoji-panel');
+        if (emojiPanel) emojiPanel.style.display = 'none';
         this._stopVBProcessing();
         const overlay = document.getElementById('breakout-timer-overlay');
         if (overlay) overlay.style.display = 'none';
@@ -1125,6 +1147,8 @@ class ZoomManager {
     onReturnToMain() {
         const helpBtn = document.getElementById('zoom-btn-help');
         if (helpBtn) helpBtn.style.display = 'none';
+        const returnBtn = document.getElementById('zoom-btn-return-main');
+        if (returnBtn) returnBtn.style.display = 'none';
         if (!this.inBreakout) {
             this._showToast('חדרי הפרצת נסגרו');
             return;
@@ -1666,6 +1690,65 @@ class ZoomManager {
         } catch(e) {}
     }
 
+    // ── Return to Main Room (host/cohost) ─────────────────────────────────────
+    returnToMain() {
+        if (!this.inBreakout) return;
+        this.onReturnToMain();
+    }
+
+    // ── Emojis ────────────────────────────────────────────────────────────────
+    toggleEmojiPanel() {
+        const panel = document.getElementById('zoom-emoji-panel');
+        if (!panel) return;
+        panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+    }
+
+    sendEmoji(emoji) {
+        if (!this.emojisEnabled) return;
+        const input = document.getElementById('zoom-chat-input');
+        if (input) { input.value += emoji; input.focus(); }
+        const panel = document.getElementById('zoom-emoji-panel');
+        if (panel) panel.style.display = 'none';
+    }
+
+    toggleEmojis() {
+        if (!this.isHost && !this.isCoHost) return;
+        const newVal = !this.emojisEnabled;
+        this.socket.emit('zoom:toggle-emojis', { roomId: this.currentRoomId, enabled: newVal });
+    }
+
+    onEmojisToggled({ enabled }) {
+        this.emojisEnabled = enabled;
+        this._updateEmojiBtn();
+        if (this.isHost || this.isCoHost) {
+            const cb = document.getElementById('zoom-emoji-toggle');
+            if (cb) cb.checked = enabled;
+        }
+    }
+
+    _updateEmojiBtn() {
+        const btn = document.getElementById('zoom-emoji-btn');
+        if (btn) { btn.disabled = !this.emojisEnabled; btn.title = this.emojisEnabled ? 'אימוגי' : 'אימוגים מושבתים'; }
+    }
+
+    // ── Knock sound (waiting room) ────────────────────────────────────────────
+    _playKnockSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const knock = (time) => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.frequency.value = 300; osc.type = 'sine';
+                gain.gain.setValueAtTime(0.4, ctx.currentTime + time);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + time + 0.12);
+                osc.start(ctx.currentTime + time); osc.stop(ctx.currentTime + time + 0.15);
+            };
+            knock(0); knock(0.18); knock(0.36);
+            setTimeout(() => { try { ctx.close(); } catch(e) {} }, 1000);
+        } catch(e) {}
+    }
+
     // ── Raise Hand ────────────────────────────────────────────────────────────
     toggleRaiseHand() {
         if (!this.socket || !this.currentRoomId) return;
@@ -1799,6 +1882,9 @@ class ZoomManager {
         this.inBreakout = true;
         this.currentRoomId = brRoomId;
         this.updateRoomLink(brRoomId);
+        // Show return-to-main button for host/cohost
+        const returnBtn = document.getElementById('zoom-btn-return-main');
+        if (returnBtn) returnBtn.style.display = '';
         this.startLocalStream().then(() => {
             this.addLocalTile();
             peers.forEach(p => {

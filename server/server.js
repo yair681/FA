@@ -99,7 +99,7 @@ function admitUser(targetSocket, room, roomId, userName, userId, userRole) {
     roomId, roomName: room.name, existingUsers, isHost: false,
     chatMode: room.chatMode || 'everyone',
     permissions: room.permissions || { allowMic: true, allowCamera: true, allowScreenShare: true },
-    settings: room.settings || {}
+    settings: room.settings || {}, emojisEnabled: room.emojisEnabled !== false
   });
   targetSocket.to(roomId).emit('zoom:user-joined', { socketId: targetSocket.id, name: userName });
   io.to(roomId).emit('zoom:participants-update', { participants: getParticipants(room) });
@@ -224,11 +224,11 @@ io.on('connection', (socket) => {
       breakout: { active: false, rooms: new Map(), timer: null },
       polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
       timer: { active: false, endTime: null, timeout: null },
-      raisedHands: new Set()
+      raisedHands: new Set(), emojisEnabled: true
     };
     zoomRooms.set(roomId, room);
     socket.join(roomId);
-    socket.emit('zoom:room-created', { roomId, roomName, permissions: room.permissions, settings: room.settings });
+    socket.emit('zoom:room-created', { roomId, roomName, permissions: room.permissions, settings: room.settings, emojisEnabled: true });
     broadcastRooms();
   });
 
@@ -627,16 +627,26 @@ io.on('connection', (socket) => {
     targets.forEach(sid => { if (sid) io.to(sid).emit('zoom:help-requested', { fromName: user.name, brRoomId, fromSocketId: socket.id }); });
   });
 
+  // ── Toggle Emojis ────────────────────────────────────────────────────
+  socket.on('zoom:toggle-emojis', ({ roomId, enabled }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    room.emojisEnabled = !!enabled;
+    io.to(roomId).emit('zoom:emojis-toggled', { enabled: room.emojisEnabled });
+  });
+
   // ── Broadcast to Breakout Rooms ──────────────────────────────────────
   socket.on('zoom:broadcast-to-breakout', ({ roomId, message }) => {
     const room = zoomRooms.get(roomId);
     if (!room || !isHostOrCoHost(socket.id, room)) return;
     const user = room.users.get(socket.id);
     const from = user ? user.name : 'מארח';
-    room.breakout.rooms.forEach((br, brId) => {
-      io.to(`${roomId}__${brId}`).emit('zoom:breakout-broadcast', { from, message, ts: Date.now() });
+    const ts = Date.now();
+    // Send directly to each participant socket ID (breakout rooms aren't socket.io rooms)
+    room.breakout.rooms.forEach(br => {
+      br.participants.forEach(sid => io.to(sid).emit('zoom:breakout-broadcast', { from, message, ts }));
     });
-    socket.emit('zoom:breakout-broadcast', { from, message, ts: Date.now() });
+    socket.emit('zoom:breakout-broadcast', { from, message, ts });
   });
 
   // ── Switch Breakout Room (participant self-move) ──────────────────────

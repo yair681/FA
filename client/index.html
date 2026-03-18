@@ -139,7 +139,11 @@
             <button onclick="zoomManager.togglePanel('chat')"><i class="fas fa-times"></i></button>
           </div>
           <div id="zoom-chat-messages" class="zoom-chat-messages"></div>
+          <div id="zoom-emoji-panel" class="zoom-emoji-panel" style="display:none">
+            <span onclick="zoomManager.sendEmoji('😀')">😀</span><span onclick="zoomManager.sendEmoji('😂')">😂</span><span onclick="zoomManager.sendEmoji('😍')">😍</span><span onclick="zoomManager.sendEmoji('🥹')">🥹</span><span onclick="zoomManager.sendEmoji('😎')">😎</span><span onclick="zoomManager.sendEmoji('😅')">😅</span><span onclick="zoomManager.sendEmoji('🤔')">🤔</span><span onclick="zoomManager.sendEmoji('😢')">😢</span><span onclick="zoomManager.sendEmoji('😮')">😮</span><span onclick="zoomManager.sendEmoji('🤩')">🤩</span><span onclick="zoomManager.sendEmoji('👍')">👍</span><span onclick="zoomManager.sendEmoji('👎')">👎</span><span onclick="zoomManager.sendEmoji('👋')">👋</span><span onclick="zoomManager.sendEmoji('👏')">👏</span><span onclick="zoomManager.sendEmoji('🙏')">🙏</span><span onclick="zoomManager.sendEmoji('💪')">💪</span><span onclick="zoomManager.sendEmoji('❤️')">❤️</span><span onclick="zoomManager.sendEmoji('🔥')">🔥</span><span onclick="zoomManager.sendEmoji('🎉')">🎉</span><span onclick="zoomManager.sendEmoji('✅')">✅</span>
+          </div>
           <div class="zoom-chat-input-row">
+            <button id="zoom-emoji-btn" class="zoom-emoji-btn" onclick="zoomManager.toggleEmojiPanel()" title="אימוגי">😊</button>
             <input id="zoom-chat-input" class="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter')zoomManager.sendChat()">
             <button onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
           </div>
@@ -163,6 +167,9 @@
               <option value="everyone">כולם יכולים לכתוב</option>
               <option value="host-only">מארח בלבד</option>
             </select>
+            <label class="perm-row" style="margin-top:0.5rem;">
+              <input type="checkbox" id="zoom-emoji-toggle" checked onchange="zoomManager.toggleEmojis()"> אפשר אימוגים
+            </label>
           </div>
           <div class="manage-section">
             <h4>הגדרות כניסה</h4>
@@ -273,6 +280,10 @@
           <span class="ctrl-label">רקע</span>
         </button>
 
+        <button id="zoom-btn-return-main" class="ctrl-btn" onclick="zoomManager.returnToMain()" title="חזור לחדר הראשי" style="display:none;">
+          <i class="fas fa-home"></i>
+          <span class="ctrl-label">חדר ראשי</span>
+        </button>
         <button id="zoom-btn-raise-hand" class="ctrl-btn" onclick="zoomManager.toggleRaiseHand()" title="הרם יד">
           <i class="fas fa-hand-paper"></i>
           <span class="ctrl-label">הרם יד</span>
