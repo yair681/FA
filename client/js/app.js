@@ -202,31 +202,77 @@ function copyText(text) {
 
 // ── Join Page (for /join/:roomId links) ───────────────────────────────────────
 async function showJoinPage(roomId) {
+    window._joinRoomId = roomId;
     document.getElementById('page-auth') && (document.getElementById('page-auth').style.display = 'none');
     document.getElementById('app') && (document.getElementById('app').style.display = 'none');
-    const joinPage = document.getElementById('page-join');
-    if (joinPage) joinPage.style.display = 'flex';
-    try {
-        const meeting = await getMeetingByRoom(roomId);
-        const titleEl = document.getElementById('join-meeting-title');
-        if (titleEl) titleEl.textContent = meeting.title || 'פגישה';
-    } catch(e) {}
-    window._joinRoomId = roomId;
-}
 
-async function proceedJoin() {
-    const roomId = window._joinRoomId;
-    if (!roomId) return;
-
+    // If already logged in, auto-join
     if (window.authManager.isLoggedIn()) {
         const user = window.authManager.currentUser;
-        document.getElementById('page-join').style.display = 'none';
         document.getElementById('app').style.display = 'flex';
+        const nameEl = document.getElementById('header-username');
+        if (nameEl) nameEl.textContent = user.name;
+        const adminNav = document.getElementById('nav-admin');
+        if (adminNav) adminNav.style.display = user.role === 'admin' ? '' : 'none';
         window.zoomManager.init(user.name, user.id, user.role);
         navigate('dashboard');
         await window.zoomManager.requestJoin(roomId);
         return;
     }
+
+    const joinPage = document.getElementById('page-join');
+    if (joinPage) joinPage.style.display = 'flex';
+    try {
+        const meeting = await getMeetingByRoom(roomId);
+        const titleEl = document.getElementById('join-meeting-title');
+        if (titleEl) titleEl.textContent = (meeting && meeting.title) ? meeting.title : 'פגישה';
+    } catch(e) {}
+    showJoinStep('choose');
+}
+
+function showJoinStep(step) {
+    ['choose', 'guest', 'login'].forEach(s => {
+        const el = document.getElementById('join-step-' + s);
+        if (el) el.style.display = s === step ? 'block' : 'none';
+    });
+}
+
+function joinAsGuest() { showJoinStep('guest'); }
+function joinAsRegistered() { showJoinStep('login'); }
+
+async function proceedJoinLoggedIn() {
+    const email = document.getElementById('join-login-email')?.value.trim();
+    const password = document.getElementById('join-login-password')?.value;
+    const errEl = document.getElementById('join-login-error');
+    if (errEl) errEl.textContent = '';
+    if (!email || !password) { if (errEl) errEl.textContent = 'יש למלא אימייל וסיסמה'; return; }
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'שגיאה בכניסה');
+        localStorage.setItem('token', data.token);
+        await window.authManager.init();
+        const user = window.authManager.currentUser;
+        document.getElementById('page-join').style.display = 'none';
+        document.getElementById('app').style.display = 'flex';
+        const nameEl = document.getElementById('header-username');
+        if (nameEl) nameEl.textContent = user.name;
+        const adminNav = document.getElementById('nav-admin');
+        if (adminNav) adminNav.style.display = user.role === 'admin' ? '' : 'none';
+        window.zoomManager.init(user.name, user.id, user.role);
+        navigate('dashboard');
+        await window.zoomManager.requestJoin(window._joinRoomId);
+    } catch(e) {
+        if (errEl) errEl.textContent = e.message || 'שגיאה בכניסה';
+    }
+}
+
+async function proceedJoin() {
+    const roomId = window._joinRoomId;
+    if (!roomId) return;
 
     const nameInput = document.getElementById('join-guest-name');
     const guestName = nameInput?.value.trim();

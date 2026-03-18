@@ -21,11 +21,12 @@ const JWT_SECRET = process.env.JWT_SECRET || 'zoom-app-secret-2024';
 
 // ── MongoDB Schemas ──────────────────────────────────────────────────────────
 const userSchema = new mongoose.Schema({
-  name:      { type: String, required: true },
-  email:     { type: String, required: true, unique: true },
-  password:  { type: String, required: true },
-  role:      { type: String, enum: ['admin', 'user'], default: 'user' },
-  createdAt: { type: Date, default: Date.now }
+  name:             { type: String, required: true },
+  email:            { type: String, required: true, unique: true },
+  password:         { type: String, required: true },
+  role:             { type: String, enum: ['admin', 'user'], default: 'user' },
+  customBackgrounds:{ type: [String], default: [] },
+  createdAt:        { type: Date, default: Date.now }
 });
 
 const meetingSchema = new mongoose.Schema({
@@ -106,12 +107,18 @@ function admitUser(targetSocket, room, roomId, userName, userId, userRole) {
   if (room.polls && room.polls.size > 0) targetSocket.emit('zoom:polls-state', { polls: pollsToArray(room.polls) });
   if (room.qa && room.qa.enabled) targetSocket.emit('zoom:qa-state', { enabled: true, requireApproval: room.qa.requireApproval, questions: room.qa.questions.filter(q => q.approved) });
   if (room.timer && room.timer.active) targetSocket.emit('zoom:timer-state', { active: true, endTime: room.timer.endTime });
+  if (room.raisedHands && room.raisedHands.size > 0) {
+    const hands = [];
+    room.raisedHands.forEach(sid => { const u = room.users.get(sid); if (u) hands.push({ socketId: sid, name: u.name }); });
+    if (hands.length) targetSocket.emit('zoom:hands-state', { hands });
+  }
 }
 
 function handleUserLeave(socket, roomId) {
   const room = zoomRooms.get(roomId); if (!room) return;
   room.users.delete(socket.id);
   room.waitingRoom.delete(socket.id);
+  if (room.raisedHands) room.raisedHands.delete(socket.id);
   socket.leave(roomId);
   if (room.screenShareSocketId === socket.id) {
     room.screenShareSocketId = null;
@@ -216,7 +223,8 @@ io.on('connection', (socket) => {
       settings: settings || { requireAdminApproval: false, allowEntryBeforeHost: false },
       breakout: { active: false, rooms: new Map(), timer: null },
       polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
-      timer: { active: false, endTime: null, timeout: null }
+      timer: { active: false, endTime: null, timeout: null },
+      raisedHands: new Set()
     };
     zoomRooms.set(roomId, room);
     socket.join(roomId);
@@ -244,7 +252,8 @@ io.on('connection', (socket) => {
                 settings: meeting.settings,
                 breakout: { active: false, rooms: new Map(), timer: null },
                 polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
-                timer: { active: false, endTime: null, timeout: null }
+                timer: { active: false, endTime: null, timeout: null },
+                raisedHands: new Set()
               };
               zoomRooms.set(roomId, room);
             }
@@ -587,6 +596,62 @@ io.on('connection', (socket) => {
     room.timer.active = false;
     io.to(roomId).emit('zoom:timer-cancelled');
   });
+
+  // ── Raise Hand ───────────────────────────────────────────────────────
+  socket.on('zoom:raise-hand', ({ roomId }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    const user = room.users.get(socket.id); if (!user) return;
+    if (!room.raisedHands) room.raisedHands = new Set();
+    room.raisedHands.add(socket.id);
+    io.to(roomId).emit('zoom:hand-raised', { socketId: socket.id, name: user.name });
+  });
+
+  socket.on('zoom:lower-hand', ({ roomId }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    if (room.raisedHands) room.raisedHands.delete(socket.id);
+    io.to(roomId).emit('zoom:hand-lowered', { socketId: socket.id });
+  });
+
+  socket.on('zoom:lower-all-hands', ({ roomId }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (room.raisedHands) room.raisedHands.clear();
+    io.to(roomId).emit('zoom:all-hands-lowered');
+  });
+
+  // ── Help Request (from breakout) ─────────────────────────────────────
+  socket.on('zoom:help-request', ({ roomId, brRoomId }) => {
+    const room = zoomRooms.get(roomId); if (!room) return;
+    const user = room.users.get(socket.id); if (!user) return;
+    const targets = [room.hostSocketId, ...Array.from(room.users.entries()).filter(([, u]) => u.isCoHost).map(([s]) => s)];
+    targets.forEach(sid => { if (sid) io.to(sid).emit('zoom:help-requested', { fromName: user.name, brRoomId, fromSocketId: socket.id }); });
+  });
+
+  // ── Broadcast to Breakout Rooms ──────────────────────────────────────
+  socket.on('zoom:broadcast-to-breakout', ({ roomId, message }) => {
+    const room = zoomRooms.get(roomId);
+    if (!room || !isHostOrCoHost(socket.id, room)) return;
+    const user = room.users.get(socket.id);
+    const from = user ? user.name : 'מארח';
+    room.breakout.rooms.forEach((br, brId) => {
+      io.to(`${roomId}__${brId}`).emit('zoom:breakout-broadcast', { from, message, ts: Date.now() });
+    });
+    socket.emit('zoom:breakout-broadcast', { from, message, ts: Date.now() });
+  });
+
+  // ── Switch Breakout Room (participant self-move) ──────────────────────
+  socket.on('zoom:switch-breakout-room', ({ roomId, newBrId }) => {
+    const room = zoomRooms.get(roomId); if (!room || !room.breakout.active) return;
+    const newBr = room.breakout.rooms.get(newBrId); if (!newBr) return;
+    room.breakout.rooms.forEach(br => br.participants.delete(socket.id));
+    newBr.participants.add(socket.id);
+    const peers = Array.from(newBr.participants)
+      .filter(s => s !== socket.id)
+      .map(s => ({ socketId: s, name: room.users.get(s)?.name || 'משתתף' }));
+    socket.emit('zoom:move-to-breakout', {
+      brRoomId: `${roomId}__${newBrId}`, brName: newBr.name, mainRoomId: roomId, peers
+    });
+  });
 });
 
 // ── Middleware & Routes ──────────────────────────────────────────────────────
@@ -740,6 +805,37 @@ app.post('/api/admin/meetings/:roomId/close', authenticateToken, isAdmin, async 
     broadcastRooms();
   }
   res.json({ message: 'Closed' });
+});
+
+app.get('/api/auth/backgrounds', authenticateToken, async (req, res) => {
+  const user = await User.findById(req.user.userId).select('customBackgrounds');
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  res.json(user.customBackgrounds || []);
+});
+
+app.post('/api/auth/backgrounds', authenticateToken, async (req, res) => {
+  try {
+    const { dataUrl } = req.body;
+    if (!dataUrl) return res.status(400).json({ error: 'dataUrl required' });
+    const user = await User.findById(req.user.userId);
+    if (!user.customBackgrounds) user.customBackgrounds = [];
+    if (user.customBackgrounds.length >= 10) user.customBackgrounds.shift();
+    user.customBackgrounds.push(dataUrl);
+    await user.save();
+    res.json(user.customBackgrounds);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/auth/backgrounds/:idx', authenticateToken, async (req, res) => {
+  try {
+    const idx = parseInt(req.params.idx);
+    const user = await User.findById(req.user.userId);
+    if (!user.customBackgrounds || idx < 0 || idx >= user.customBackgrounds.length)
+      return res.status(400).json({ error: 'Invalid index' });
+    user.customBackgrounds.splice(idx, 1);
+    await user.save();
+    res.json(user.customBackgrounds);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {

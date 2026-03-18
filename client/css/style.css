@@ -449,3 +449,21 @@ select.form-control { appearance: none; }
   .zoom-controls { padding: 8px; gap: 4px; }
   .ctrl-btn { padding: 8px 10px; min-width: 44px; }
 }
+
+/* ── Chat message word wrap ───────────────────────────────────────────── */
+.zoom-chat-msg { word-break: break-word; white-space: pre-wrap; overflow-wrap: anywhere; }
+.zoom-chat-msg.broadcast-msg { background: rgba(245,158,11,0.08); border-right: 3px solid var(--warning); padding-right: 8px; border-radius: 4px; }
+.zoom-chat-msg.broadcast-msg .zoom-chat-msg-from { color: var(--warning); }
+
+/* ── Raised hand ─────────────────────────────────────────────────────── */
+.hand-raised-icon { font-size: 0.95rem; }
+
+/* ── Help notification ───────────────────────────────────────────────── */
+.help-notification { position: fixed; bottom: 80px; right: 20px; z-index: 2000; animation: slideInRight 0.3s ease; }
+.help-notif-content { background: var(--dark2); border: 1px solid var(--warning); border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); max-width: 380px; }
+.help-notif-close { background: none; color: var(--gray); font-size: 1.2rem; padding: 0 4px; line-height: 1; }
+.help-notif-close:hover { color: var(--white); }
+@keyframes slideInRight { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ── Guest ended overlay ─────────────────────────────────────────────── */
+#guest-ended-overlay { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; direction: rtl; }

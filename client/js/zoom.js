@@ -31,8 +31,12 @@ class ZoomManager {
         this.timerInterval = null;
         this.timerEndTime = null;
 
+        // Raised hands
+        this.raisedHands = new Map();  // socketId -> name
+        this.myHandRaised = false;
+
         // Virtual background
-        this.virtualBgType = 'none';   // 'none' | 'blur' | 'preset'
+        this.virtualBgType = 'none';   // 'none' | 'blur' | 'preset' | 'custom'
         this.virtualBgPreset = null;   // 'night' | 'forest' | 'galaxy' | 'sea' | 'coffee' | 'office'
         this.virtualBgCanvas = null;
         this.virtualBgCtx = null;
@@ -40,6 +44,8 @@ class ZoomManager {
         this.selfieSegmentation = null;
         this._vbVideoEl = null;
         this._vbAnimId = null;
+        this._customBgImg = null;
+        this._customBgList = [];
 
         this.iceServers = {
             iceServers: [
@@ -102,6 +108,15 @@ class ZoomManager {
         this.socket.on('zoom:return-to-main',         () => this.onReturnToMain());
         this.socket.on('zoom:breakout-timer-started', d => this.onBreakoutTimerStarted(d));
         this.socket.on('zoom:breakout-closed',        () => this.onReturnToMain());
+        this.socket.on('zoom:breakout-nav-response',  d => this.onBreakoutNavResponse(d));
+        this.socket.on('zoom:help-requested',         d => this.onHelpRequested(d));
+        this.socket.on('zoom:breakout-broadcast',     d => this.onBreakoutBroadcast(d));
+
+        // Raise Hand
+        this.socket.on('zoom:hand-raised',    d => this.onHandRaised(d));
+        this.socket.on('zoom:hand-lowered',   d => this.onHandLowered(d));
+        this.socket.on('zoom:all-hands-lowered', () => this.onAllHandsLowered());
+        this.socket.on('zoom:hands-state',    d => d.hands.forEach(h => this.onHandRaised(h)));
 
         // Polls
         this.socket.on('zoom:poll-created',  d => this.onPollReceived(d));
@@ -277,6 +292,7 @@ class ZoomManager {
 
     onMeetingEnded({ reason }) {
         const msg = reason === 'admin' ? 'הפגישה נסגרה על ידי מנהל המערכת.' : 'המארח סיים את הפגישה.';
+        if (this.userRole === 'guest') { this._showGuestEndedScreen(msg); return; }
         if (!this.isHost) this._showToast(msg);
         this.fullReset();
     }
@@ -289,6 +305,11 @@ class ZoomManager {
     }
 
     updateRoomLink(roomId) {
+        if (this.inBreakout) {
+            document.querySelectorAll('.zoom-join-link-box').forEach(el => el.style.display = 'none');
+            return;
+        }
+        document.querySelectorAll('.zoom-join-link-box').forEach(el => el.style.display = '');
         const linkEl = document.getElementById('zoom-room-link');
         if (linkEl) linkEl.value = window.location.origin + '/join/' + roomId;
     }
@@ -297,12 +318,19 @@ class ZoomManager {
         const panel = document.getElementById('zoom-participants-panel');
         if (!panel) return;
         const mySocketId = this.socket ? this.socket.id : '';
-        panel.innerHTML = participants.map(p => {
+        const isManager = this.isHost || this.isCoHost;
+        const hasHands = this.raisedHands.size > 0;
+        let html = '';
+        if (isManager && hasHands) {
+            html += `<div style="margin-bottom:0.5rem;"><button class="btn btn-sm btn-outline" onclick="zoomManager.lowerAllHands()"><i class="fas fa-hand-paper"></i> הורד כל הידיים</button></div>`;
+        }
+        html += participants.map(p => {
             const badge = p.isHost ? '<span class="zoom-badge host">מארח</span>'
                 : p.isCoHost ? '<span class="zoom-badge cohost">מנהל-שותף</span>' : '';
             const isMe = p.socketId === mySocketId;
-            const canManage = (this.isHost || this.isCoHost) && !isMe && !p.isHost;
+            const canManage = isManager && !isMe && !p.isHost;
             const muteIcon = !p.audioOn ? ' <i class="fas fa-microphone-slash" style="color:#ef4444;font-size:0.75rem;" title="מושתק"></i>' : '';
+            const handIcon = this.raisedHands.has(p.socketId) ? ' <span class="hand-raised-icon" title="יד מורמת">✋</span>' : '';
             let actions = '';
             if (this.isHost && !isMe && !p.isHost) {
                 actions += p.isCoHost
@@ -328,11 +356,12 @@ class ZoomManager {
                     if (camOff) camOff.remove();
                 }
             }
-            return `<div class="zoom-participant-row ${isMe ? 'me' : ''}">
-                <span class="zoom-participant-name"><i class="fas fa-user"></i> ${p.name}${muteIcon} ${badge}</span>
+            return `<div class="zoom-participant-row ${isMe ? 'me' : ''}" data-participant-sid="${p.socketId}">
+                <span class="zoom-participant-name"><i class="fas fa-user"></i> ${p.name}${muteIcon}${handIcon} ${badge}</span>
                 ${actions ? `<div class="zoom-participant-actions">${actions}</div>` : ''}
             </div>`;
         }).join('');
+        panel.innerHTML = html;
         this.updateCount(participants.length);
     }
 
@@ -367,14 +396,29 @@ class ZoomManager {
     }
 
     updateHostControls() {
+        const isManager = this.isHost || this.isCoHost;
         const btnManage = document.getElementById('zoom-btn-manage');
-        if (btnManage) btnManage.style.display = (this.isHost || this.isCoHost || window.authManager?.isAdmin()) ? '' : 'none';
+        if (btnManage) btnManage.style.display = (isManager || window.authManager?.isAdmin()) ? '' : 'none';
         const endBtn = document.getElementById('zoom-end-meeting-btn');
         if (endBtn) endBtn.style.display = this.isHost ? 'inline-flex' : 'none';
         const leaveBtn = document.getElementById('zoom-leave-btn');
         if (leaveBtn) leaveBtn.style.display = this.isHost ? 'none' : 'inline-flex';
+        // Plugins button visible to everyone
         const pluginsBtn = document.getElementById('zoom-btn-plugins');
-        if (pluginsBtn) pluginsBtn.style.display = (this.isHost || this.isCoHost) ? '' : 'none';
+        if (pluginsBtn) pluginsBtn.style.display = '';
+        // Breakout and timer tabs — host/cohost only
+        const btTab = document.querySelector('.plugin-tab-btn[data-tab="breakout"]');
+        const tmTab = document.querySelector('.plugin-tab-btn[data-tab="timer"]');
+        if (btTab) btTab.style.display = isManager ? '' : 'none';
+        if (tmTab) tmTab.style.display = isManager ? '' : 'none';
+        // Hide poll creation area for non-managers
+        const pollCreate = document.getElementById('poll-create-area');
+        if (pollCreate) pollCreate.style.display = isManager ? '' : 'none';
+        // Hide QA toggle/approval for non-managers
+        const qaToggleRow = document.getElementById('qa-toggle-row');
+        if (qaToggleRow) qaToggleRow.style.display = isManager ? '' : 'none';
+        const qaApprovalRow = document.getElementById('qa-approval-row');
+        if (qaApprovalRow) qaApprovalRow.style.display = isManager ? '' : 'none';
         // "Allow entry before host" only visible to system admins
         const entryRow = document.getElementById('zoom-setting-entry-before-row');
         if (entryRow) entryRow.style.display = window.authManager?.isAdmin() ? '' : 'none';
@@ -927,6 +971,11 @@ class ZoomManager {
         this.polls.clear(); this.qaEnabled = false; this.qaQuestions = [];
         if (this.timerInterval) { clearInterval(this.timerInterval); this.timerInterval = null; }
         this.timerEndTime = null;
+        this.raisedHands.clear(); this.myHandRaised = false;
+        const helpBtn = document.getElementById('zoom-btn-help');
+        if (helpBtn) helpBtn.style.display = 'none';
+        const raiseBtn = document.getElementById('zoom-btn-raise-hand');
+        if (raiseBtn) raiseBtn.classList.remove('active');
         this._stopVBProcessing();
         const overlay = document.getElementById('breakout-timer-overlay');
         if (overlay) overlay.style.display = 'none';
@@ -998,7 +1047,10 @@ class ZoomManager {
             <div class="breakout-rooms-grid">
                 ${rooms.map(r => `
                     <div class="breakout-room-col" id="br-col-${r.id}" ondragover="event.preventDefault()" ondrop="zoomManager.dropToBreakout(event,'${r.id}')">
-                        <div class="breakout-room-header">${r.name} <small style="color:var(--gray)">(${(r.members||[]).length})</small></div>
+                        <div class="breakout-room-header" style="display:flex;align-items:center;justify-content:space-between;">
+                            <span>${r.name} <small style="color:var(--gray)">(${(r.members||[]).length})</small></span>
+                            <button class="btn btn-sm btn-outline" style="padding:2px 7px;font-size:0.75rem;" onclick="zoomManager.visitBreakout('${r.id}')"><i class="fas fa-door-open"></i> כנס</button>
+                        </div>
                         <div class="breakout-room-members" id="br-members-${r.id}">
                             ${(r.members || []).map(m => chip(m, r.id)).join('')}
                         </div>
@@ -1009,9 +1061,16 @@ class ZoomManager {
                 <button class="btn btn-primary" onclick="zoomManager.launchBreakoutRooms()"><i class="fas fa-play"></i> פתח חדרים</button>
                 <button class="btn btn-danger btn-sm" onclick="zoomManager.closeBreakoutRooms()"><i class="fas fa-times"></i> סגור הכל</button>
                 <div style="display:flex;align-items:center;gap:0.4rem;margin-right:auto;">
-                    <label style="font-size:0.85rem;">טיימר:</label>
-                    <input type="number" id="breakout-timer-min" min="1" max="120" value="15" style="width:60px;" class="form-control">
-                    <span style="font-size:0.85rem;">דקות</span>
+                    <label style="font-size:0.85rem;">טיימר (0=ללא):</label>
+                    <input type="number" id="breakout-timer-min" min="0" max="120" value="0" style="width:55px;" class="form-control">
+                    <span style="font-size:0.85rem;">דק'</span>
+                </div>
+            </div>
+            <div style="margin-top:0.75rem;border-top:1px solid var(--dark3);padding-top:0.75rem;">
+                <div style="font-size:0.82rem;color:var(--gray);margin-bottom:0.35rem;"><i class="fas fa-broadcast-tower"></i> שידור לכל החדרים</div>
+                <div style="display:flex;gap:0.4rem;">
+                    <input type="text" id="breakout-broadcast-input" class="form-control" placeholder="הודעה לכל המשתתפים..." style="font-size:0.82rem;">
+                    <button class="btn btn-primary btn-sm" onclick="zoomManager.broadcastToBreakout()"><i class="fas fa-paper-plane"></i></button>
                 </div>
             </div>`;
     }
@@ -1048,9 +1107,14 @@ class ZoomManager {
         this._resetForBreakout();
         this.inBreakout = true;
         this.currentRoomId = brRoomId;
+        this.updateRoomLink(brRoomId);
+        // Show help button for participants (not host)
+        if (!this.isHost && !this.isCoHost) {
+            const helpBtn = document.getElementById('zoom-btn-help');
+            if (helpBtn) helpBtn.style.display = '';
+        }
         this.startLocalStream().then(() => {
             this.addLocalTile();
-            // Connect to peers already in breakout room
             peers.forEach(p => {
                 this.addRemoteTilePlaceholder(p.socketId, p.name);
                 this.createOffer(p.socketId, p.name);
@@ -1059,8 +1123,9 @@ class ZoomManager {
     }
 
     onReturnToMain() {
+        const helpBtn = document.getElementById('zoom-btn-help');
+        if (helpBtn) helpBtn.style.display = 'none';
         if (!this.inBreakout) {
-            // Just close breakout UI for host
             this._showToast('חדרי הפרצת נסגרו');
             return;
         }
@@ -1069,6 +1134,7 @@ class ZoomManager {
         this._resetForBreakout();
         this.inBreakout = false;
         this.currentRoomId = mainRoom;
+        this.updateRoomLink(mainRoom);
         this.startLocalStream().then(() => {
             this.socket.emit('zoom:request-join', { roomId: mainRoom, userName: this.userName, userId: this.userId });
         });
@@ -1134,12 +1200,12 @@ class ZoomManager {
     // ── Virtual Background ────────────────────────────────────────────────────
     openBgPicker() {
         if (!this.localStream) { this._showToast('יש להיות בשיחה פעילה'); return; }
-        // Update selected state
         document.querySelectorAll('.bg-option').forEach(el => el.classList.remove('selected'));
         const currentKey = this.virtualBgType === 'none' ? 'none'
             : this.virtualBgType === 'blur' ? 'blur' : this.virtualBgPreset;
         const sel = document.querySelector(`.bg-option[data-bg="${currentKey}"]`);
         if (sel) sel.classList.add('selected');
+        this.loadCustomBackgrounds();
         if (typeof openModal === 'function') openModal('modal-bg-picker');
     }
 
@@ -1240,6 +1306,11 @@ class ZoomManager {
             if (this.virtualBgType === 'blur') {
                 ctx.filter = 'blur(10px)';
                 ctx.drawImage(this._vbVideoEl, 0, 0, canvas.width, canvas.height);
+            } else if (this.virtualBgType === 'custom' && this._customBgImg) {
+                ctx.drawImage(this._customBgImg, 0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = 0.85;
+                ctx.drawImage(this._vbVideoEl, 0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = 1;
             } else {
                 this._drawPresetBg(ctx, canvas.width, canvas.height);
                 ctx.globalAlpha = 0.85;
@@ -1277,6 +1348,8 @@ class ZoomManager {
             ctx.filter = 'none';
         } else if (this.virtualBgType === 'preset') {
             this._drawPresetBg(ctx, w, h);
+        } else if (this.virtualBgType === 'custom' && this._customBgImg) {
+            ctx.drawImage(this._customBgImg, 0, 0, w, h);
         }
 
         ctx.globalCompositeOperation = 'source-over';
@@ -1590,6 +1663,236 @@ class ZoomManager {
             beep(880, 0, 0.3); beep(880, 0.4, 0.3); beep(880, 0.8, 0.3); beep(1100, 1.2, 0.8);
             setTimeout(() => { try { ctx.close(); } catch(e) {} }, 6000);
         } catch(e) {}
+    }
+
+    // ── Raise Hand ────────────────────────────────────────────────────────────
+    toggleRaiseHand() {
+        if (!this.socket || !this.currentRoomId) return;
+        this.myHandRaised = !this.myHandRaised;
+        const btn = document.getElementById('zoom-btn-raise-hand');
+        if (this.myHandRaised) {
+            this.socket.emit('zoom:raise-hand', { roomId: this.currentRoomId });
+            if (btn) { btn.classList.add('active'); btn.title = 'הורד יד'; }
+            this._playHandRaisedSound();
+        } else {
+            this.socket.emit('zoom:lower-hand', { roomId: this.currentRoomId });
+            if (btn) { btn.classList.remove('active'); btn.title = 'הרם יד'; }
+        }
+    }
+
+    onHandRaised({ socketId, name }) {
+        this.raisedHands.set(socketId, name);
+        if (socketId !== this.socket?.id) this._playHandRaisedSound();
+        const row = document.querySelector(`[data-participant-sid="${socketId}"]`);
+        if (row) {
+            const nameEl = row.querySelector('.zoom-participant-name');
+            if (nameEl && !nameEl.querySelector('.hand-raised-icon')) {
+                const span = document.createElement('span');
+                span.className = 'hand-raised-icon'; span.title = 'יד מורמת'; span.textContent = ' ✋';
+                nameEl.appendChild(span);
+            }
+        }
+    }
+
+    onHandLowered({ socketId }) {
+        this.raisedHands.delete(socketId);
+        if (socketId === this.socket?.id) {
+            this.myHandRaised = false;
+            const btn = document.getElementById('zoom-btn-raise-hand');
+            if (btn) btn.classList.remove('active');
+        }
+        document.querySelectorAll(`[data-participant-sid="${socketId}"] .hand-raised-icon`).forEach(el => el.remove());
+    }
+
+    onAllHandsLowered() {
+        this.raisedHands.clear();
+        this.myHandRaised = false;
+        const btn = document.getElementById('zoom-btn-raise-hand');
+        if (btn) btn.classList.remove('active');
+        document.querySelectorAll('.hand-raised-icon').forEach(el => el.remove());
+    }
+
+    lowerAllHands() {
+        if (!this.isHost && !this.isCoHost) return;
+        this.socket.emit('zoom:lower-all-hands', { roomId: this.currentRoomId });
+    }
+
+    _playHandRaisedSound() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.frequency.value = 660; osc.type = 'sine';
+            gain.gain.setValueAtTime(0.2, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.5);
+            setTimeout(() => { try { ctx.close(); } catch(e) {} }, 1000);
+        } catch(e) {}
+    }
+
+    // ── Help Request (from breakout room) ─────────────────────────────────────
+    requestHelp() {
+        if (!this.socket || !this.inBreakout) return;
+        this.socket.emit('zoom:help-request', { roomId: this.mainRoomId, brRoomId: this.currentRoomId });
+        this._showToast('בקשת עזרה נשלחה למארח');
+    }
+
+    onHelpRequested({ fromName, brRoomId }) {
+        this._showHelpNotification(fromName, brRoomId);
+    }
+
+    _showHelpNotification(fromName, brRoomId) {
+        const notif = document.createElement('div');
+        notif.className = 'help-notification';
+        const brId = brRoomId ? brRoomId.split('__')[1] || brRoomId : '';
+        notif.innerHTML = `
+            <div class="help-notif-content">
+                <i class="fas fa-hand-paper" style="color:#f59e0b;font-size:1.2rem;"></i>
+                <span>${fromName} מבקש עזרה בחדר ${brId}</span>
+                <button class="btn btn-primary btn-sm" onclick="zoomManager.visitBreakout('${brId}');this.closest('.help-notification').remove()">
+                    <i class="fas fa-door-open"></i> כנס
+                </button>
+                <button class="help-notif-close" onclick="this.closest('.help-notification').remove()">&times;</button>
+            </div>`;
+        document.body.appendChild(notif);
+        setTimeout(() => { if (notif.parentNode) notif.remove(); }, 15000);
+    }
+
+    // ── Breakout Broadcast ────────────────────────────────────────────────────
+    broadcastToBreakout() {
+        const input = document.getElementById('breakout-broadcast-input');
+        const msg = input?.value.trim();
+        if (!msg) return;
+        this.socket.emit('zoom:broadcast-to-breakout', { roomId: this.currentRoomId || this.mainRoomId, message: msg });
+        if (input) input.value = '';
+    }
+
+    onBreakoutBroadcast({ from, message, ts }) {
+        const time = new Date(ts).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+        const msgs = document.getElementById('zoom-chat-messages');
+        if (msgs) {
+            const div = document.createElement('div');
+            div.className = 'zoom-chat-msg broadcast-msg';
+            div.innerHTML = `<div class="zoom-chat-msg-from"><i class="fas fa-broadcast-tower"></i> שידור מ${from} · ${time}</div><div>${message}</div>`;
+            msgs.appendChild(div);
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+        this._showToast('שידור: ' + message.substring(0, 60));
+    }
+
+    // ── Host Visit Breakout Room ──────────────────────────────────────────────
+    visitBreakout(brId) {
+        if (!this.socket) return;
+        const roomId = this.inBreakout ? this.mainRoomId : this.currentRoomId;
+        this.socket.emit('zoom:navigate-breakout', { roomId, brId });
+    }
+
+    onBreakoutNavResponse({ brRoomId, brName, mainRoomId, peers }) {
+        this._showToast('נכנסת לחדר: ' + brName);
+        if (!this.mainRoomId) this.mainRoomId = mainRoomId;
+        this._resetForBreakout();
+        this.inBreakout = true;
+        this.currentRoomId = brRoomId;
+        this.updateRoomLink(brRoomId);
+        this.startLocalStream().then(() => {
+            this.addLocalTile();
+            peers.forEach(p => {
+                this.addRemoteTilePlaceholder(p.socketId, p.name);
+                this.createOffer(p.socketId, p.name);
+            });
+        });
+    }
+
+    // ── Switch Breakout Room (participant) ────────────────────────────────────
+    switchBreakoutRoom(brId) {
+        if (!this.socket || !this.inBreakout) return;
+        this.socket.emit('zoom:switch-breakout-room', { roomId: this.mainRoomId, newBrId: brId });
+    }
+
+    // ── Guest Ended Screen ────────────────────────────────────────────────────
+    _showGuestEndedScreen(msg) {
+        this.fullReset();
+        let overlay = document.getElementById('guest-ended-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'guest-ended-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:#0d1117;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;color:#fff;text-align:center;';
+            document.body.appendChild(overlay);
+        }
+        let count = 5;
+        overlay.innerHTML = `
+            <i class="fas fa-video-slash" style="font-size:4rem;color:#ef4444;margin-bottom:1rem;"></i>
+            <h2 style="margin-bottom:0.5rem;">השיחה הסתיימה</h2>
+            <p style="color:#94a3b8;">${msg}</p>
+            <p id="guest-redirect-count" style="color:#64748b;margin-top:1rem;">מועבר לדף הבית בעוד ${count}...</p>`;
+        const interval = setInterval(() => {
+            count--;
+            const el = document.getElementById('guest-redirect-count');
+            if (el) el.textContent = `מועבר לדף הבית בעוד ${count}...`;
+            if (count <= 0) { clearInterval(interval); window.location.href = '/'; }
+        }, 1000);
+    }
+
+    // ── Custom Backgrounds ────────────────────────────────────────────────────
+    async uploadBackground(input) {
+        const file = input.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const bgs = await apiFetch('/api/auth/backgrounds', { method: 'POST', body: { dataUrl: e.target.result } });
+                this._renderCustomBackgrounds(bgs);
+                this._showToast('הרקע נשמר!');
+            } catch(err) { this._showToast('שגיאה בשמירת הרקע'); }
+        };
+        reader.readAsDataURL(file);
+        input.value = '';
+    }
+
+    async loadCustomBackgrounds() {
+        if (this.userRole === 'guest') return;
+        try {
+            const bgs = await apiFetch('/api/auth/backgrounds');
+            this._customBgList = bgs || [];
+            this._renderCustomBackgrounds(this._customBgList);
+        } catch(e) {}
+    }
+
+    _renderCustomBackgrounds(backgrounds) {
+        const container = document.getElementById('bg-custom-container');
+        if (!container) return;
+        this._customBgList = backgrounds || [];
+        if (!this._customBgList.length) {
+            container.innerHTML = '<p style="font-size:0.78rem;color:var(--gray);grid-column:1/-1;">לא הועלו רקעים מותאמים אישית</p>';
+            return;
+        }
+        container.innerHTML = this._customBgList.map((bg, idx) => `
+            <div class="bg-option" onclick="zoomManager.setCustomBackground(${idx})">
+                <div class="bg-preview" style="background-image:url(${bg});background-size:cover;background-position:center;"></div>
+                <span>רקע ${idx + 1} <button onclick="event.stopPropagation();zoomManager.deleteBackground(${idx})" style="background:none;color:#ef4444;font-size:0.7rem;padding:0;margin-right:2px;" title="מחק">✕</button></span>
+            </div>`).join('');
+    }
+
+    async deleteBackground(idx) {
+        try {
+            const bgs = await apiFetch('/api/auth/backgrounds/' + idx, { method: 'DELETE' });
+            this._renderCustomBackgrounds(bgs);
+        } catch(e) { this._showToast('שגיאה במחיקה'); }
+    }
+
+    async setCustomBackground(idx) {
+        if (!this._customBgList || !this._customBgList[idx]) return;
+        const dataUrl = this._customBgList[idx];
+        const img = new Image();
+        img.onload = async () => {
+            this._customBgImg = img;
+            const wasActive = this.virtualBgType !== 'none';
+            this.virtualBgType = 'custom';
+            this.virtualBgPreset = null;
+            if (wasActive && this.virtualBgCanvas) return; // already running
+            await this._startVBProcessing();
+        };
+        img.src = dataUrl;
     }
 }
 

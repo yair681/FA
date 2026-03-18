@@ -205,7 +205,7 @@
           <!-- Polls tab -->
           <div id="plugin-tab-polls" class="plugin-tab-content" style="display:none;padding:0.75rem;">
             <h4 style="margin-bottom:0.5rem;">סקרים</h4>
-            <div style="margin-bottom:1rem;">
+            <div id="poll-create-area" style="margin-bottom:1rem;">
               <input id="poll-question" class="form-control" placeholder="שאלת הסקר..." style="margin-bottom:0.5rem;">
               <div id="poll-options-container">
                 <input type="text" class="form-control poll-option-input" placeholder="אפשרות 1" style="margin-bottom:0.4rem;">
@@ -220,16 +220,18 @@
           <!-- Q&A tab -->
           <div id="plugin-tab-qa" class="plugin-tab-content" style="display:none;padding:0.75rem;">
             <h4 style="margin-bottom:0.5rem;">שאלות ותשובות</h4>
-            <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+            <div id="qa-toggle-row" style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
               <span>הפעל שאלות:</span>
               <label class="toggle-switch">
                 <input type="checkbox" id="qa-toggle" onchange="zoomManager.toggleQA()">
                 <span class="toggle-slider"></span>
               </label>
             </div>
-            <label class="perm-row" style="margin-bottom:0.75rem;">
-              <input type="checkbox" id="qa-require-approval"> דרוש אישור לשאלות
-            </label>
+            <div id="qa-approval-row">
+              <label class="perm-row" style="margin-bottom:0.75rem;">
+                <input type="checkbox" id="qa-require-approval"> דרוש אישור לשאלות
+              </label>
+            </div>
             <div id="qa-section" style="display:none;">
               <div id="qa-list"></div>
             </div>
@@ -269,6 +271,15 @@
         <button id="zoom-bg-btn" class="ctrl-btn" onclick="zoomManager.openBgPicker()" title="רקע וירטואלי">
           <i class="fas fa-image"></i>
           <span class="ctrl-label">רקע</span>
+        </button>
+
+        <button id="zoom-btn-raise-hand" class="ctrl-btn" onclick="zoomManager.toggleRaiseHand()" title="הרם יד">
+          <i class="fas fa-hand-paper"></i>
+          <span class="ctrl-label">הרם יד</span>
+        </button>
+        <button id="zoom-btn-help" class="ctrl-btn" onclick="zoomManager.requestHelp()" title="בקש עזרה מהמארח" style="display:none;">
+          <i class="fas fa-question-circle"></i>
+          <span class="ctrl-label">עזרה</span>
         </button>
 
         <div class="ctrl-separator"></div>
@@ -406,9 +417,36 @@
   <div class="join-card">
     <div class="auth-logo"><i class="fas fa-video"></i></div>
     <h2 id="join-meeting-title">הצטרף לפגישה</h2>
-    <p style="color:var(--gray);margin-bottom:1rem;">הזן את שמך כדי להצטרף</p>
-    <input type="text" id="join-guest-name" class="form-control" placeholder="השם שלך...">
-    <button class="btn btn-primary btn-full" onclick="proceedJoin()" style="margin-top:0.75rem;">הצטרף <i class="fas fa-arrow-left"></i></button>
+
+    <!-- Step 1: Choose -->
+    <div id="join-step-choose">
+      <p style="color:var(--gray);margin-bottom:1.5rem;text-align:center;">כיצד ברצונך להצטרף?</p>
+      <button class="btn btn-primary btn-full" onclick="joinAsRegistered()" style="margin-bottom:0.75rem;">
+        <i class="fas fa-user-check"></i> כניסה עם חשבון רשום
+      </button>
+      <button class="btn btn-outline btn-full" onclick="joinAsGuest()">
+        <i class="fas fa-user"></i> כניסה כאורח
+      </button>
+    </div>
+
+    <!-- Step 2: Guest name -->
+    <div id="join-step-guest" style="display:none">
+      <p style="color:var(--gray);margin-bottom:1rem;">הזן את שמך כדי להצטרף כאורח</p>
+      <input type="text" id="join-guest-name" class="form-control" placeholder="השם שלך...">
+      <button class="btn btn-primary btn-full" onclick="proceedJoin()" style="margin-top:0.75rem;">הצטרף <i class="fas fa-arrow-left"></i></button>
+      <button class="btn btn-outline btn-full" onclick="showJoinStep('choose')" style="margin-top:0.5rem;"><i class="fas fa-arrow-right"></i> חזור</button>
+    </div>
+
+    <!-- Step 3: Login -->
+    <div id="join-step-login" style="display:none">
+      <p style="color:var(--gray);margin-bottom:1rem;">היכנס עם חשבונך</p>
+      <input type="email" id="join-login-email" class="form-control" placeholder="אימייל" style="margin-bottom:0.5rem;">
+      <input type="password" id="join-login-password" class="form-control" placeholder="סיסמה">
+      <div id="join-login-error" style="color:#ef4444;font-size:0.85rem;min-height:1.2rem;margin-top:0.4rem;"></div>
+      <button class="btn btn-primary btn-full" onclick="proceedJoinLoggedIn()" style="margin-top:0.75rem;">כניסה והצטרפות <i class="fas fa-arrow-left"></i></button>
+      <button class="btn btn-outline btn-full" onclick="showJoinStep('choose')" style="margin-top:0.5rem;"><i class="fas fa-arrow-right"></i> חזור</button>
+    </div>
+
     <a href="/" class="join-back" style="display:block;text-align:center;margin-top:1rem;color:var(--gray);font-size:0.85rem;">חזור לדף הבית</a>
   </div>
 </div>
@@ -513,6 +551,16 @@
         </div>
       </div>
       <p style="font-size:0.78rem;color:var(--gray);margin-top:14px;"><i class="fas fa-info-circle"></i> הרקע הוירטואלי דורש מצלמה פעילה. ייתכן עיכוב בהפעלה ראשונה.</p>
+      <div style="margin-top:1rem;border-top:1px solid var(--dark3);padding-top:1rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+          <span style="font-size:0.88rem;font-weight:500;">רקעים מותאמים אישית</span>
+          <label class="btn btn-sm btn-outline" style="cursor:pointer;margin:0;">
+            <i class="fas fa-upload"></i> העלה תמונה
+            <input type="file" accept="image/*" style="display:none" onchange="zoomManager.uploadBackground(this)">
+          </label>
+        </div>
+        <div id="bg-custom-container" class="bg-options-grid"></div>
+      </div>
     </div>
   </div>
 </div>
