@@ -52,7 +52,12 @@ async function onAuthSuccess() {
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function loadDashboard() {
-    window.zoomManager.loadRoomsList();
+    const isAdmin = window.authManager?.isAdmin();
+    // Active rooms section only for admins
+    const activeSection = document.getElementById('active-rooms-section');
+    if (activeSection) activeSection.style.display = isAdmin ? 'block' : 'none';
+    if (isAdmin) window.zoomManager.loadRoomsList();
+
     apiFetch('/api/admin/settings').then(s => {
         window.zoomManager.applyCreatePermission({ locked: s.lockMeetingCreation });
     }).catch(() => {});
@@ -72,14 +77,11 @@ function closeModal(id) {
 // ── Meeting creation ──────────────────────────────────────────────────────────
 async function startInstantMeeting() {
     const user = window.authManager.currentUser;
-    try {
-        const meeting = await createMeeting(user.name + ' - שיחה מיידית', 'instant', null, {});
-        closeModal('modal-instant');
-        navigate('dashboard');
-        await window.zoomManager.joinRoom(meeting.roomId, meeting.title, true, 'instant');
-    } catch(e) {
-        showToast('שגיאה ביצירת שיחה: ' + e.message);
-    }
+    // Instant meetings don't need DB — just create a socket room directly
+    const roomId = 'instant-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2,5);
+    const roomName = user.name + ' - שיחה מיידית';
+    navigate('dashboard');
+    await window.zoomManager.joinRoom(roomId, roomName, true, 'instant');
 }
 
 async function createScheduledMeeting() {

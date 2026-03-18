@@ -82,6 +82,7 @@ class ZoomManager {
         this.socket.on('zoom:chat-mode-changed',     d => this.onChatModeChanged(d));
         this.socket.on('zoom:muted-by-host',         () => this.onMutedByHost());
         this.socket.on('zoom:permissions-changed',   d => this.onPermissionsChanged(d));
+        this.socket.on('zoom:settings-updated',      d => this.onMeetingSettingsUpdated(d));
 
         // Breakout
         this.socket.on('zoom:breakout-rooms-created', d => this.onBreakoutCreated(d));
@@ -170,7 +171,7 @@ class ZoomManager {
     async requestJoin(roomId) {
         if (!this.socket || !this.socket.connected) { this._showToast('לא מחובר. נסה שוב.'); return; }
         await this.startLocalStream();
-        this.socket.emit('zoom:request-join', { roomId, userName: this.userName, userId: this.userId });
+        this.socket.emit('zoom:request-join', { roomId, userName: this.userName, userId: this.userId, userRole: this.userRole });
     }
 
     adminClose(roomId) {
@@ -345,15 +346,31 @@ class ZoomManager {
 
     updateHostControls() {
         const btnManage = document.getElementById('zoom-btn-manage');
-        if (btnManage) btnManage.style.display = (this.isHost || this.isCoHost) ? '' : 'none';
-        const whitelist = document.getElementById('zoom-whitelist-section');
-        if (whitelist) whitelist.style.display = this.isHost ? 'block' : 'none';
+        if (btnManage) btnManage.style.display = (this.isHost || this.isCoHost || window.authManager?.isAdmin()) ? '' : 'none';
         const endBtn = document.getElementById('zoom-end-meeting-btn');
         if (endBtn) endBtn.style.display = this.isHost ? 'inline-flex' : 'none';
         const leaveBtn = document.getElementById('zoom-leave-btn');
         if (leaveBtn) leaveBtn.style.display = this.isHost ? 'none' : 'inline-flex';
         const pluginsBtn = document.getElementById('zoom-btn-plugins');
         if (pluginsBtn) pluginsBtn.style.display = (this.isHost || this.isCoHost) ? '' : 'none';
+        // "Allow entry before host" only visible to system admins
+        const entryRow = document.getElementById('zoom-setting-entry-before-row');
+        if (entryRow) entryRow.style.display = window.authManager?.isAdmin() ? '' : 'none';
+    }
+
+    onMeetingSettingsUpdated({ settings }) {
+        const approvalCb = document.getElementById('zoom-setting-approval');
+        if (approvalCb) approvalCb.checked = settings.requireAdminApproval || false;
+        const entryBeforeCb = document.getElementById('zoom-setting-entry-before');
+        if (entryBeforeCb) entryBeforeCb.checked = settings.allowEntryBeforeHost || false;
+    }
+
+    updateMeetingSettings(key, value) {
+        if (!this.socket || !this.currentRoomId) return;
+        this.socket.emit('zoom:update-meeting-settings', {
+            roomId: this.currentRoomId,
+            settings: { [key]: value }
+        });
     }
 
     // ── Panel toggling ────────────────────────────────────────────────────────
@@ -558,8 +575,7 @@ class ZoomManager {
             this._showToast('המארח חסם את שיתוף המסך'); return;
         }
         try {
-            const includeAudio = document.getElementById('zoom-screen-audio')?.checked ?? false;
-            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: includeAudio });
+            this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: true });
             const videoTrack = this.screenStream.getVideoTracks()[0];
             const audioTrack = this.screenStream.getAudioTracks()[0] || null;
             const replacePromises = [];

@@ -32,7 +32,7 @@ const meetingSchema = new mongoose.Schema({
   title:       { type: String, required: true },
   hostId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   hostName:    { type: String, required: true },
-  type:        { type: String, enum: ['scheduled', 'permanent'], required: true },
+  type:        { type: String, enum: ['instant', 'scheduled', 'permanent'], required: true },
   scheduledAt: { type: Date },
   roomId:      { type: String, required: true, unique: true },
   status:      { type: String, enum: ['scheduled', 'ended'], default: 'scheduled' },
@@ -87,8 +87,8 @@ function notifyWaitingUpdate(room) {
   targets.forEach(sid => { if (sid) io.to(sid).emit('zoom:waiting-update', { waitingList }); });
 }
 
-function admitUser(targetSocket, room, roomId, userName, userId) {
-  room.users.set(targetSocket.id, { name: userName, userId, isCoHost: false, audioOn: true, videoOn: true });
+function admitUser(targetSocket, room, roomId, userName, userId, userRole) {
+  room.users.set(targetSocket.id, { name: userName, userId, userRole: userRole || 'user', isCoHost: false, audioOn: true, videoOn: true });
   targetSocket.join(roomId);
   const existingUsers = [];
   room.users.forEach((u, sid) => {
@@ -192,7 +192,7 @@ io.on('connection', (socket) => {
     if (existingRoom && existingRoom.permanent && existingRoom._empty) {
       existingRoom._empty = false;
       existingRoom.hostSocketId = socket.id;
-      existingRoom.users.set(socket.id, { name: userName, userId, isCoHost: false, audioOn: true, videoOn: true });
+      existingRoom.users.set(socket.id, { name: userName, userId, userRole: userRole || 'user', isCoHost: false, audioOn: true, videoOn: true });
       socket.join(roomId);
       socket.emit('zoom:room-created', { roomId, roomName: existingRoom.name, permissions: existingRoom.permissions, settings: existingRoom.settings });
       existingRoom.waitingRoom.forEach((w, wsid) => {
@@ -208,7 +208,7 @@ io.on('connection', (socket) => {
 
     const room = {
       name: roomName, hostSocketId: socket.id, hostUserId: userId,
-      users: new Map([[socket.id, { name: userName, userId, isCoHost: false, audioOn: true, videoOn: true }]]),
+      users: new Map([[socket.id, { name: userName, userId, userRole: userRole || 'user', isCoHost: false, audioOn: true, videoOn: true }]]),
       waitingRoom: new Map(), whitelist: new Set(),
       screenShareSocketId: null, chatMode: 'everyone',
       permissions: { allowMic: true, allowCamera: true, allowScreenShare: true },
@@ -224,7 +224,7 @@ io.on('connection', (socket) => {
     broadcastRooms();
   });
 
-  socket.on('zoom:request-join', async ({ roomId, userName, userId }) => {
+  socket.on('zoom:request-join', async ({ roomId, userName, userId, userRole }) => {
     let room = zoomRooms.get(roomId);
 
     if (!room || room._empty) {
@@ -259,15 +259,12 @@ io.on('connection', (socket) => {
       socket.emit('zoom:error', { message: 'החדר לא נמצא' }); return;
     }
 
-    if (room.whitelist.size > 0 && room.whitelist.has(String(userId))) {
-      admitUser(socket, room, roomId, userName, userId); return;
-    }
     if (room.settings && room.settings.requireAdminApproval) {
-      room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId });
+      room.waitingRoom.set(socket.id, { socketId: socket.id, name: userName, userId, userRole: userRole || 'user' });
       socket.emit('zoom:waiting', { roomName: room.name });
       notifyWaitingUpdate(room); return;
     }
-    admitUser(socket, room, roomId, userName, userId);
+    admitUser(socket, room, roomId, userName, userId, userRole);
   });
 
   socket.on('zoom:approve-join', ({ roomId, targetSocketId }) => {
@@ -276,7 +273,7 @@ io.on('connection', (socket) => {
     const w = room.waitingRoom.get(targetSocketId); if (!w) return;
     room.waitingRoom.delete(targetSocketId);
     const ts = io.sockets.sockets.get(targetSocketId);
-    if (ts) admitUser(ts, room, roomId, w.name, w.userId);
+    if (ts) admitUser(ts, room, roomId, w.name, w.userId, w.userRole);
     notifyWaitingUpdate(room);
   });
 
@@ -331,9 +328,18 @@ io.on('connection', (socket) => {
 
   socket.on('zoom:update-meeting-settings', ({ roomId, settings }) => {
     const room = zoomRooms.get(roomId);
-    if (!room || socket.id !== room.hostSocketId) return;
-    room.settings = { ...room.settings, ...settings };
+    if (!room) return;
+    const user = room.users.get(socket.id);
+    const isAdminUser = user && user.userRole === 'admin';
+    if (!isHostOrCoHost(socket.id, room) && !isAdminUser) return;
+    // Only system admins can change allowEntryBeforeHost
+    const update = { ...settings };
+    if (!isAdminUser && 'allowEntryBeforeHost' in update) delete update.allowEntryBeforeHost;
+    room.settings = { ...room.settings, ...update };
     io.to(roomId).emit('zoom:settings-updated', { settings: room.settings });
+    if (room.permanent) {
+      Meeting.findOneAndUpdate({ roomId }, { settings: room.settings }).catch(() => {});
+    }
   });
 
   socket.on('zoom:chat-message', ({ roomId, text }) => {
@@ -362,8 +368,15 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('zoom:meeting-ended', { reason: 'host' });
     if (room.timer && room.timer.timeout) clearTimeout(room.timer.timeout);
     if (room.breakout && room.breakout.timer) clearTimeout(room.breakout.timer);
-    zoomRooms.delete(roomId); broadcastRooms();
-    Meeting.findOneAndUpdate({ roomId }, { status: 'ended' }).catch(() => {});
+    if (room.permanent) {
+      room._empty = true;
+      room.users.clear();
+      room.waitingRoom.clear();
+    } else {
+      zoomRooms.delete(roomId);
+      Meeting.findOneAndUpdate({ roomId, type: { $ne: 'permanent' } }, { status: 'ended' }).catch(() => {});
+    }
+    broadcastRooms();
   });
 
   socket.on('zoom:admin-close', ({ roomId }) => {
@@ -755,6 +768,9 @@ async function createDefaultUsers() {
       console.log(`✅ Admin created: ${a.name}`);
     }
   }
+  // Remove all non-admin users
+  const deleted = await User.deleteMany({ role: { $ne: 'admin' } });
+  if (deleted.deletedCount > 0) console.log(`🗑 Removed ${deleted.deletedCount} non-admin user(s)`);
 }
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'index.html')));

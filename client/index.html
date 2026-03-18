@@ -78,8 +78,8 @@
       </div>
     </div>
 
-    <!-- Active rooms -->
-    <div class="section">
+    <!-- Active rooms — admins only -->
+    <div class="section" id="active-rooms-section" style="display:none">
       <h2>פגישות פעילות <button class="btn btn-sm btn-outline" onclick="zoomManager.loadRoomsList()" style="margin-right:0.5rem;font-size:0.8rem;"><i class="fas fa-sync"></i></button></h2>
       <div id="zoom-rooms-list" class="rooms-list"></div>
     </div>
@@ -158,19 +158,15 @@
             <label class="perm-row"><input type="checkbox" id="zoom-perm-camera" onchange="zoomManager.updateRoomPermission('allowCamera',this.checked)" checked> מצלמה</label>
             <label class="perm-row"><input type="checkbox" id="zoom-perm-screen" onchange="zoomManager.updateRoomPermission('allowScreenShare',this.checked)" checked> שיתוף מסך</label>
           </div>
-          <div id="zoom-whitelist-section" class="manage-section" style="display:none">
-            <h4>רשימה לבנה</h4>
-            <div style="position:relative;">
-              <input id="zoom-whitelist-input" class="form-control" placeholder="חפש משתמש..." oninput="zoomManager.searchWhitelist(this.value)">
-              <div id="zoom-whitelist-suggestions" class="zoom-suggestions" style="display:none"></div>
-            </div>
-            <div id="zoom-whitelist-tags" class="zoom-tags"></div>
-            <button class="btn btn-primary btn-sm" onclick="zoomManager.submitWhitelist()">שמור רשימה</button>
-          </div>
           <div class="manage-section">
-            <h4>שיתוף מסך</h4>
+            <h4>הגדרות כניסה</h4>
             <label class="perm-row">
-              <input type="checkbox" id="zoom-screen-audio"> כלול אודיו בשיתוף
+              <input type="checkbox" id="zoom-setting-approval" onchange="zoomManager.updateMeetingSettings('requireAdminApproval', this.checked)">
+              דרוש אישור מנהל לכניסה
+            </label>
+            <label class="perm-row" id="zoom-setting-entry-before-row" style="display:none">
+              <input type="checkbox" id="zoom-setting-entry-before" onchange="zoomManager.updateMeetingSettings('allowEntryBeforeHost', this.checked)">
+              אפשר להיכנס לפני המארח
             </label>
           </div>
         </div>
