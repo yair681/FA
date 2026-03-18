@@ -139,13 +139,13 @@
             <button onclick="zoomManager.togglePanel('chat')"><i class="fas fa-times"></i></button>
           </div>
           <div id="zoom-chat-messages" class="zoom-chat-messages"></div>
-          <div id="zoom-emoji-panel" class="zoom-emoji-panel" style="display:none">
-            <span onclick="zoomManager.sendEmoji('😀')">😀</span><span onclick="zoomManager.sendEmoji('😂')">😂</span><span onclick="zoomManager.sendEmoji('😍')">😍</span><span onclick="zoomManager.sendEmoji('🥹')">🥹</span><span onclick="zoomManager.sendEmoji('😎')">😎</span><span onclick="zoomManager.sendEmoji('😅')">😅</span><span onclick="zoomManager.sendEmoji('🤔')">🤔</span><span onclick="zoomManager.sendEmoji('😢')">😢</span><span onclick="zoomManager.sendEmoji('😮')">😮</span><span onclick="zoomManager.sendEmoji('🤩')">🤩</span><span onclick="zoomManager.sendEmoji('👍')">👍</span><span onclick="zoomManager.sendEmoji('👎')">👎</span><span onclick="zoomManager.sendEmoji('👋')">👋</span><span onclick="zoomManager.sendEmoji('👏')">👏</span><span onclick="zoomManager.sendEmoji('🙏')">🙏</span><span onclick="zoomManager.sendEmoji('💪')">💪</span><span onclick="zoomManager.sendEmoji('❤️')">❤️</span><span onclick="zoomManager.sendEmoji('🔥')">🔥</span><span onclick="zoomManager.sendEmoji('🎉')">🎉</span><span onclick="zoomManager.sendEmoji('✅')">✅</span>
-          </div>
           <div class="zoom-chat-input-row">
+            <div id="zoom-emoji-panel" class="zoom-emoji-panel" style="display:none">
+              <span onclick="zoomManager.sendEmoji('😀')">😀</span><span onclick="zoomManager.sendEmoji('😂')">😂</span><span onclick="zoomManager.sendEmoji('😍')">😍</span><span onclick="zoomManager.sendEmoji('🥹')">🥹</span><span onclick="zoomManager.sendEmoji('😎')">😎</span><span onclick="zoomManager.sendEmoji('😅')">😅</span><span onclick="zoomManager.sendEmoji('🤔')">🤔</span><span onclick="zoomManager.sendEmoji('😢')">😢</span><span onclick="zoomManager.sendEmoji('😮')">😮</span><span onclick="zoomManager.sendEmoji('🤩')">🤩</span><span onclick="zoomManager.sendEmoji('👍')">👍</span><span onclick="zoomManager.sendEmoji('👎')">👎</span><span onclick="zoomManager.sendEmoji('👋')">👋</span><span onclick="zoomManager.sendEmoji('👏')">👏</span><span onclick="zoomManager.sendEmoji('🙏')">🙏</span><span onclick="zoomManager.sendEmoji('💪')">💪</span><span onclick="zoomManager.sendEmoji('❤️')">❤️</span><span onclick="zoomManager.sendEmoji('🔥')">🔥</span><span onclick="zoomManager.sendEmoji('🎉')">🎉</span><span onclick="zoomManager.sendEmoji('✅')">✅</span>
+            </div>
             <button id="zoom-emoji-btn" class="zoom-emoji-btn" onclick="zoomManager.toggleEmojiPanel()" title="אימוגי">😊</button>
             <input id="zoom-chat-input" class="zoom-chat-input" placeholder="כתוב הודעה..." onkeydown="if(event.key==='Enter')zoomManager.sendChat()">
-            <button onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
+            <button class="zoom-chat-send-btn" onclick="zoomManager.sendChat()"><i class="fas fa-paper-plane"></i></button>
           </div>
         </div>
 
