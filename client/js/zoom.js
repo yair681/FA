@@ -29,6 +29,10 @@ class ZoomManager {
         this.polls = new Map();
         this.qaEnabled = false;
         this.qaQuestions = [];
+        // AI Chat
+        this.aiMode = 'private'; // 'private' | 'public'
+        this.aiMessages = []; // private history
+        this.aiLocked = false;
         this.timerInterval = null;
         this.timerEndTime = null;
 
@@ -174,6 +178,9 @@ class ZoomManager {
 
         // Raise Hand
         this.socket.on('zoom:hand-raised',    d => this.onHandRaised(d));
+        // AI
+        this.socket.on('zoom:ai-lock-changed',  d => this.onAiLockChanged(d));
+        this.socket.on('zoom:ai-public-message', d => this.onAiPublicMessage(d));
         this.socket.on('zoom:hand-lowered',   d => this.onHandLowered(d));
         this.socket.on('zoom:all-hands-lowered', () => this.onAllHandsLowered());
         this.socket.on('zoom:hands-state',    d => d.hands.forEach(h => this.onHandRaised(h)));
@@ -552,9 +559,10 @@ class ZoomManager {
         document.querySelectorAll('.plugin-tab-content').forEach(el => el.style.display = 'none');
         document.querySelectorAll('.plugin-tab-btn').forEach(el => el.classList.remove('active'));
         const content = document.getElementById('plugin-tab-' + tab);
-        if (content) content.style.display = 'block';
+        if (content) content.style.display = tab === 'ai' ? 'flex' : 'block';
         const btn = document.querySelector(`.plugin-tab-btn[data-tab="${tab}"]`);
         if (btn) btn.classList.add('active');
+        if (tab === 'ai') this.onShowAiTab();
     }
 
     // ── Chat ──────────────────────────────────────────────────────────────────
@@ -1275,6 +1283,7 @@ class ZoomManager {
         this.breakoutRooms = []; this.breakoutParticipants = []; this.inBreakout = false;
         this.peerVideoTrackCount.clear();
         this.polls.clear(); this.qaEnabled = false; this.qaQuestions = [];
+        this.aiMessages = []; this.aiLocked = false; this._renderAiMessages();
         if (this.timerInterval) { clearInterval(this.timerInterval); this.timerInterval = null; }
         this.timerEndTime = null;
         this.raisedHands.clear(); this.myHandRaised = false;
