@@ -171,8 +171,54 @@ function closeBreakoutRooms(room, roomId) {
   io.to(roomId).emit('zoom:breakout-closed');
 }
 
+// ── Debug: wrap socket handlers with try/catch ────────────────────────────────
+/**
+ * Returns a wrapped version of `handler` that catches any thrown error,
+ * logs it to the server console with full stack, and emits a
+ * `debug:server-error` event back to the originating socket.
+ */
+function wrapHandler(socket, eventName, handler) {
+  const isAsync = handler.constructor.name === 'AsyncFunction';
+  if (isAsync) {
+    return async function (...args) {
+      try {
+        await handler(...args);
+      } catch (err) {
+        console.error(`[debug] Socket event error [${eventName}]:`, err);
+        socket.emit('debug:server-error', {
+          event: eventName,
+          error: err.message,
+          stack: err.stack || null
+        });
+      }
+    };
+  }
+  return function (...args) {
+    try {
+      handler(...args);
+    } catch (err) {
+      console.error(`[debug] Socket event error [${eventName}]:`, err);
+      socket.emit('debug:server-error', {
+        event: eventName,
+        error: err.message,
+        stack: err.stack || null
+      });
+    }
+  };
+}
+
 // ── Socket.IO ────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
+
+  // Patch socket.on so every handler is automatically wrapped with try/catch.
+  // We skip 'disconnect' (handled separately) and 'debug:*' events.
+  const _origSocketOn = socket.on.bind(socket);
+  socket.on = function (event, handler) {
+    if (typeof handler === 'function' && event !== 'disconnect' && !event.startsWith('debug:')) {
+      return _origSocketOn(event, wrapHandler(socket, event, handler));
+    }
+    return _origSocketOn(event, handler);
+  };
 
   socket.on('zoom:get-rooms', () => {
     const list = [];
@@ -690,6 +736,36 @@ io.on('connection', (socket) => {
       .map(s => ({ socketId: s, name: room.users.get(s)?.name || 'משתתף' }));
     socket.emit('zoom:move-to-breakout', {
       brRoomId: `${roomId}__${newBrId}`, brName: newBr.name, mainRoomId: roomId, peers
+    });
+  });
+
+  // ── Debug: ping / room state summary ─────────────────────────────────
+  _origSocketOn('debug:ping', () => {
+    // Find which room this socket is in
+    let roomSummary = null;
+    zoomRooms.forEach((room, roomId) => {
+      if (room.users.has(socket.id)) {
+        roomSummary = {
+          roomId,
+          roomName: room.name,
+          usersCount: room.users.size,
+          waitingCount: room.waitingRoom.size,
+          hostSocketId: room.hostSocketId,
+          isBreakoutActive: room.breakout ? room.breakout.active : false,
+          breakoutRoomsCount: room.breakout ? room.breakout.rooms.size : 0,
+          permanent: room.permanent || false,
+          chatMode: room.chatMode,
+          emojisEnabled: room.emojisEnabled !== false,
+          timerActive: room.timer ? room.timer.active : false
+        };
+      }
+    });
+    socket.emit('debug:pong', {
+      socketId: socket.id,
+      totalRooms: zoomRooms.size,
+      room: roomSummary,
+      serverTime: new Date().toISOString(),
+      uptime: process.uptime()
     });
   });
 });

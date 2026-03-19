@@ -75,6 +75,12 @@ class ZoomManager {
             reconnectionDelayMax: 5000
         });
 
+        // Attach debug listeners — safe even if DebugPanel is not loaded
+        if (window.DebugPanel) {
+            DebugPanel.attachSocket(this.socket);
+            DebugPanel.log('info', 'ZoomManager: socket initialised', { origin: window.location.origin });
+        }
+
         this.socket.on('connect', () => {
             this.setStatus('מחובר');
             this.loadRoomsList();
@@ -169,6 +175,18 @@ class ZoomManager {
         this.socket.on('zoom:timer-cancelled', () => this.onTimerCancelled());
         this.socket.on('zoom:timer-ended',     () => this.onTimerEnded());
         this.socket.on('zoom:timer-state',     d => { if (d.active) this.onTimerStarted({ endTime: d.endTime, seconds: Math.round((d.endTime - Date.now()) / 1000) }); });
+
+        // Debug events from server
+        this.socket.on('debug:server-error', d => {
+            if (window.DebugPanel) {
+                DebugPanel.log('server', 'Server error in [' + d.event + ']: ' + d.error, d.stack || null);
+            }
+        });
+        this.socket.on('debug:pong', d => {
+            if (window.DebugPanel) {
+                DebugPanel.log('info', 'debug:pong — room state from server', d);
+            }
+        });
     }
 
     // ── Wait for socket connection ────────────────────────────────────────────
@@ -856,10 +874,38 @@ class ZoomManager {
             this.attachRemoteStream(socketId, userName, e.streams[0]);
         };
         pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            if (window.DebugPanel) DebugPanel.log(
+                (state === 'failed' || state === 'closed') ? 'error' : 'webrtc',
+                'RTCPeerConnection [' + (userName || socketId) + '] connectionState → ' + state,
+                null
+            );
             // 'disconnected' is transient — wait before acting. Only act on 'failed' or 'closed'.
-            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+            if (state === 'failed' || state === 'closed') {
                 this.onUserLeft({ socketId });
             }
+        };
+        pc.oniceconnectionstatechange = () => {
+            const state = pc.iceConnectionState;
+            if (window.DebugPanel) DebugPanel.log(
+                (state === 'failed' || state === 'disconnected') ? 'warn' : 'webrtc',
+                'RTCPeerConnection [' + (userName || socketId) + '] iceConnectionState → ' + state,
+                null
+            );
+        };
+        pc.onsignalingstatechange = () => {
+            if (window.DebugPanel) DebugPanel.log(
+                'webrtc',
+                'RTCPeerConnection [' + (userName || socketId) + '] signalingState → ' + pc.signalingState,
+                null
+            );
+        };
+        pc.onicecandidateerror = e => {
+            if (window.DebugPanel) DebugPanel.log(
+                'warn',
+                'RTCPeerConnection [' + (userName || socketId) + '] ICE candidate error ' + e.errorCode + ': ' + e.errorText,
+                { url: e.url, errorCode: e.errorCode, errorText: e.errorText }
+            );
         };
         return pc;
     }
@@ -886,7 +932,10 @@ class ZoomManager {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             this.socket.emit('zoom:answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
-        } catch(e) { console.warn('onOffer failed:', e); }
+        } catch(e) {
+            console.warn('onOffer failed:', e);
+            if (window.DebugPanel) DebugPanel.log('error', 'onOffer failed [peer=' + fromSocketId + ']: ' + e.message, e.stack || null);
+        }
     }
 
     async onAnswer({ fromSocketId, answer }) {
@@ -895,12 +944,21 @@ class ZoomManager {
             if (pc && pc.signalingState === 'have-local-offer') {
                 await pc.setRemoteDescription(new RTCSessionDescription(answer));
             }
-        } catch(e) { console.warn('onAnswer failed:', e); }
+        } catch(e) {
+            console.warn('onAnswer failed:', e);
+            if (window.DebugPanel) DebugPanel.log('error', 'onAnswer failed [peer=' + fromSocketId + ']: ' + e.message, e.stack || null);
+        }
     }
 
     async onIceCandidate({ fromSocketId, candidate }) {
         const pc = this.peers.get(fromSocketId);
-        if (pc && candidate) try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+        if (pc && candidate) {
+            try {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch(e) {
+                if (window.DebugPanel) DebugPanel.log('warn', 'addIceCandidate failed [peer=' + fromSocketId + ']: ' + e.message, e.stack || null);
+            }
+        }
     }
 
     closePeer(socketId) {
