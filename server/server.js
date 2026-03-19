@@ -289,7 +289,7 @@ io.on('connection', (socket) => {
       breakout: { active: false, rooms: new Map(), timer: null },
       polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
       timer: { active: false, endTime: null, timeout: null },
-      raisedHands: new Set(), emojisEnabled: true, aiLocked: false
+      raisedHands: new Set(), emojisEnabled: true
     };
     zoomRooms.set(roomId, room);
     socket.join(roomId);
@@ -318,7 +318,7 @@ io.on('connection', (socket) => {
                 breakout: { active: false, rooms: new Map(), timer: null },
                 polls: new Map(), qa: { enabled: false, requireApproval: false, questions: [] },
                 timer: { active: false, endTime: null, timeout: null },
-                raisedHands: new Set(), aiLocked: false
+                raisedHands: new Set()
               };
               zoomRooms.set(roomId, room);
             }
@@ -699,14 +699,6 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('zoom:timer-cancelled');
   });
 
-  // ── AI Chat Lock ─────────────────────────────────────────────────────
-  socket.on('zoom:ai-lock', ({ roomId, locked }) => {
-    const room = zoomRooms.get(roomId);
-    if (!room || !isHostOrCoHost(socket.id, room)) return;
-    room.aiLocked = locked;
-    io.to(roomId).emit('zoom:ai-lock-changed', { locked });
-  });
-
   // ── Raise Hand ───────────────────────────────────────────────────────
   socket.on('zoom:raise-hand', ({ roomId }) => {
     const room = zoomRooms.get(roomId); if (!room) return;
@@ -1018,54 +1010,6 @@ async function createDefaultUsers() {
     }
   }
 }
-
-// ── AI Chat (Groq) ────────────────────────────────────────────────────────────
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-
-app.post('/api/ai/chat', authenticateToken, async (req, res) => {
-  try {
-    const { messages, roomId, mode } = req.body;
-    if (!GROQ_API_KEY) return res.status(503).json({ error: 'AI לא מוגדר בשרת' });
-
-    const room = zoomRooms.get(roomId);
-    if (room && room.aiLocked) return res.status(403).json({ error: "הצ'אט עם AI נעול על ידי המארח" });
-
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'llama3-70b-8192',
-        messages: [
-          { role: 'system', content: 'אתה עוזר AI מועיל בפגישה. ענה תמיד בעברית אלא אם מבקשים אחרת. היה קצר וממוקד.' },
-          ...messages
-        ],
-        max_tokens: 1024,
-        temperature: 0.7
-      })
-    });
-
-    if (!groqRes.ok) {
-      const err = await groqRes.text();
-      return res.status(502).json({ error: 'שגיאה מה-AI: ' + err });
-    }
-
-    const data = await groqRes.json();
-    const reply = data.choices?.[0]?.message?.content || '';
-
-    if (mode === 'public' && room) {
-      io.to(roomId).emit('zoom:ai-public-message', {
-        from: req.user.name,
-        question: messages[messages.length - 1]?.content || '',
-        answer: reply
-      });
-    }
-
-    res.json({ reply });
-  } catch (e) {
-    console.error('AI error:', e);
-    res.status(500).json({ error: 'שגיאה פנימית' });
-  }
-});
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '..', 'client', 'index.html')));
 
