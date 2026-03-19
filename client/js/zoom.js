@@ -37,6 +37,8 @@ class ZoomManager {
         this.peerVideoTrackCount = new Map(); // socketId -> how many video tracks received
         this.emojisEnabled = true;
         this._waitingCount = 0;
+        this._peerIsInitiator    = new Set(); // socketIds where we sent the offer
+        this._peerReconnectCount = new Map(); // socketId → retry attempts
 
         // Virtual background
         this.virtualBgType = 'none';   // 'none' | 'blur' | 'preset' | 'custom'
@@ -880,10 +882,32 @@ class ZoomManager {
                 'RTCPeerConnection [' + (userName || socketId) + '] connectionState → ' + state,
                 null
             );
-            // 'disconnected' is transient — wait before acting. Only act on 'failed' or 'closed'.
-            if (state === 'failed' || state === 'closed') {
+            // 'disconnected' is transient — wait before acting.
+            if (state === 'failed') {
+                const retries = this._peerReconnectCount.get(socketId) || 0;
+                if (retries < 2 && this._peerIsInitiator.has(socketId)) {
+                    // We initiated — try to reconnect
+                    this._peerReconnectCount.set(socketId, retries + 1);
+                    if (window.DebugPanel) DebugPanel.log('warn',
+                        'ICE failed for [' + (userName || socketId) + '] — reconnect attempt #' + (retries + 1), null);
+                    this.closePeer(socketId);
+                    setTimeout(() => {
+                        if (this.currentRoomId) this.createOffer(socketId, userName);
+                    }, 1500);
+                } else {
+                    // Gave up — remove peer
+                    if (window.DebugPanel) DebugPanel.log('error',
+                        'ICE permanently failed for [' + (userName || socketId) + '] — removing peer', null);
+                    this._peerReconnectCount.delete(socketId);
+                    this._peerIsInitiator.delete(socketId);
+                    this.onUserLeft({ socketId });
+                }
+            } else if (state === 'closed') {
+                this._peerReconnectCount.delete(socketId);
+                this._peerIsInitiator.delete(socketId);
                 this.onUserLeft({ socketId });
             }
+
         };
         pc.oniceconnectionstatechange = () => {
             const state = pc.iceConnectionState;
@@ -912,6 +936,7 @@ class ZoomManager {
 
     async createOffer(targetSocketId, targetName) {
         try {
+            this._peerIsInitiator.add(targetSocketId);
             const pc = this.createPeerConnection(targetSocketId, targetName);
             const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
             await pc.setLocalDescription(offer);
@@ -966,6 +991,8 @@ class ZoomManager {
         if (pc) { pc.close(); this.peers.delete(socketId); }
         this.peerVideoTrackCount.delete(socketId);
         this.stopAudioAnalyzer(socketId);
+        // Note: _peerIsInitiator and _peerReconnectCount are intentionally NOT cleared here
+        // so reconnect logic can still read them after closePeer() is called.
     }
 
     // ── Local Stream ──────────────────────────────────────────────────────────
