@@ -58,7 +58,23 @@ class ZoomManager {
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' }
+                { urls: 'stun:stun2.l.google.com:19302' },
+                // TURN servers — required when NAT/firewall blocks direct P2P after reconnect
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ]
         };
     }
@@ -146,7 +162,13 @@ class ZoomManager {
         this.socket.on('zoom:move-to-breakout',       d => this.onMoveToBreakout(d));
         this.socket.on('zoom:return-to-main',         () => this.onReturnToMain());
         this.socket.on('zoom:breakout-timer-started', d => this.onBreakoutTimerStarted(d));
-        this.socket.on('zoom:breakout-closed',        () => this.onReturnToMain());
+        // zoom:breakout-closed arrives for users in the main room when breakouts close.
+        // If we are currently transitioning FROM a breakout (inBreakout=true), we are
+        // already handling it via zoom:return-to-main — calling onReturnToMain() again
+        // would reset freshly-created peers and silently break audio/video for everyone.
+        this.socket.on('zoom:breakout-closed', () => {
+            if (!this.inBreakout) this.onReturnToMain();
+        });
         this.socket.on('zoom:breakout-nav-response',  d => this.onBreakoutNavResponse(d));
         this.socket.on('zoom:help-requested',         d => this.onHelpRequested(d));
         this.socket.on('zoom:breakout-broadcast',     d => this.onBreakoutBroadcast(d));
