@@ -976,9 +976,12 @@ class ZoomManager {
             // Replace a stale/closed PC — this happens when the host stays in the main room
             // while participants enter breakout rooms and then return. The old PC is closed
             // but still in this.peers, causing the signalingState guard below to bail out.
+            // IMPORTANT: use closePeer() (not a manual close) so peerVideoTrackCount and
+            // peerScreenShareStreamIds are also reset. Without this, the stale count causes
+            // the returning participant's camera track to be treated as a screen share stream,
+            // which then causes the audio track to be silently dropped (screen-share audio guard).
             if (pc && (pc.signalingState === 'closed' || pc.connectionState === 'closed' || pc.connectionState === 'failed')) {
-                pc.close();
-                this.peers.delete(fromSocketId);
+                this.closePeer(fromSocketId);
                 pc = null;
             }
             if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
