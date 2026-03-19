@@ -959,6 +959,8 @@ class ZoomManager {
 
     async createOffer(targetSocketId, targetName) {
         try {
+            // Close any existing peer connection for this socket before creating a new one
+            if (this.peers.has(targetSocketId)) this.closePeer(targetSocketId);
             this._peerIsInitiator.add(targetSocketId);
             const pc = this.createPeerConnection(targetSocketId, targetName);
             const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
@@ -1433,6 +1435,8 @@ class ZoomManager {
     }
 
     _resetForBreakout() {
+        // Stop screen sharing before tearing down peers so state stays consistent
+        if (this.isScreenSharing) this.stopScreenShare();
         this.peers.forEach((_, sid) => this.closePeer(sid));
         this.peers.clear();
         this.peerVideoTrackCount.clear();
@@ -1527,10 +1531,11 @@ class ZoomManager {
             this.virtualBgStream = this.virtualBgCanvas.captureStream(25);
             const virtualTrack = this.virtualBgStream.getVideoTracks()[0];
 
-            // Replace video track in all peers
+            // Replace camera video track in all peers (not the screen share track)
             if (virtualTrack) {
+                const cameraTrack = this.localStream?.getVideoTracks()[0] || null;
                 this.peers.forEach(pc => {
-                    const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+                    const sender = pc.getSenders().find(s => s.track && cameraTrack && s.track === cameraTrack);
                     if (sender) sender.replaceTrack(virtualTrack);
                 });
             }

@@ -511,6 +511,7 @@ io.on('connection', (socket) => {
   socket.on('zoom:create-breakout-rooms', ({ roomId, count }) => {
     const room = zoomRooms.get(roomId);
     if (!room || !isHostOrCoHost(socket.id, room)) return;
+    if (room.breakout && room.breakout.timer) clearTimeout(room.breakout.timer);
     room.breakout = { active: false, rooms: new Map(), timer: null };
     for (let i = 1; i <= Math.min(count, 50); i++) room.breakout.rooms.set(`br-${i}`, { name: `חדר ${i}`, participants: new Set() });
     socket.emit('zoom:breakout-rooms-created', { rooms: breakoutToArray(room.breakout.rooms), participants: getParticipants(room) });
