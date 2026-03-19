@@ -3,6 +3,7 @@ class ZoomManager {
     constructor() {
         this.socket = null;
         this.localStream = null;
+        this._iceCandidateQueue = new Map(); // socketId → [candidates] — queued until remote desc is set
         this.screenStream = null;
         this.peers = new Map();
         this.audioAnalyzers = new Map();
@@ -991,6 +992,7 @@ class ZoomManager {
             }
             if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-remote-offer') return;
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            await this._flushIceCandidates(fromSocketId);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             this.socket.emit('zoom:answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
@@ -1005,6 +1007,7 @@ class ZoomManager {
             const pc = this.peers.get(fromSocketId);
             if (pc && pc.signalingState === 'have-local-offer') {
                 await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                await this._flushIceCandidates(fromSocketId);
             }
         } catch(e) {
             console.warn('onAnswer failed:', e);
@@ -1014,11 +1017,30 @@ class ZoomManager {
 
     async onIceCandidate({ fromSocketId, candidate }) {
         const pc = this.peers.get(fromSocketId);
-        if (pc && candidate) {
+        if (!pc || !candidate) return;
+        // If remote description is not set yet, queue the candidate
+        if (!pc.remoteDescription || !pc.remoteDescription.type) {
+            if (!this._iceCandidateQueue.has(fromSocketId)) this._iceCandidateQueue.set(fromSocketId, []);
+            this._iceCandidateQueue.get(fromSocketId).push(candidate);
+            return;
+        }
+        try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch(e) {
+            if (window.DebugPanel) DebugPanel.log('warn', 'addIceCandidate failed [peer=' + fromSocketId + ']: ' + e.message, e.stack || null);
+        }
+    }
+
+    async _flushIceCandidates(socketId) {
+        const pc = this.peers.get(socketId);
+        const queue = this._iceCandidateQueue.get(socketId);
+        if (!pc || !queue || queue.length === 0) return;
+        this._iceCandidateQueue.delete(socketId);
+        for (const candidate of queue) {
             try {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
             } catch(e) {
-                if (window.DebugPanel) DebugPanel.log('warn', 'addIceCandidate failed [peer=' + fromSocketId + ']: ' + e.message, e.stack || null);
+                if (window.DebugPanel) DebugPanel.log('warn', 'flushIceCandidate failed [peer=' + socketId + ']: ' + e.message, null);
             }
         }
     }
