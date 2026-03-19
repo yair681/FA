@@ -175,12 +175,17 @@ function closeBreakoutRooms(room, roomId) {
     });
   });
   room.breakout.rooms.clear();
-  // Send zoom:breakout-closed ONLY to users in the main room (not breakout participants
-  // who are already getting zoom:return-to-main — sending both causes onReturnToMain
-  // to fire twice on participants, breaking freshly-established reconnections)
+  // Send zoom:breakout-closed ONLY to users physically in the main room socket.io room.
+  // Checking room.users alone is not enough — a participant can be in room.users but
+  // also in breakoutSids (they joined the main room first then moved to breakout).
+  // Using s.rooms.has(roomId) ensures we only notify sockets that are truly in the
+  // main Socket.IO room right now, preventing onReturnToMain from firing twice.
   room.users.forEach((u, sid) => {
     if (!breakoutSids.has(sid)) {
-      io.to(sid).emit('zoom:breakout-closed');
+      const s = io.sockets.sockets.get(sid);
+      if (s && s.rooms.has(roomId)) {
+        io.to(sid).emit('zoom:breakout-closed');
+      }
     }
   });
 }
