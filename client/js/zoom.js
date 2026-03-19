@@ -35,6 +35,7 @@ class ZoomManager {
         this.raisedHands = new Map();  // socketId -> name
         this.myHandRaised = false;
         this.peerVideoTrackCount = new Map(); // socketId -> how many video tracks received
+        this.peerScreenShareStreamIds = new Map(); // socketId -> stream.id of the screen share stream
         this.emojisEnabled = true;
         this._waitingCount = 0;
         this._peerIsInitiator    = new Set(); // socketIds where we sent the offer
@@ -876,10 +877,18 @@ class ZoomManager {
                 const count = this.peerVideoTrackCount.get(socketId) || 0;
                 this.peerVideoTrackCount.set(socketId, count + 1);
                 if (count > 0) {
-                    // Second video track = screen share stream
+                    // Second video track = screen share stream — record its stream ID
+                    this.peerScreenShareStreamIds.set(socketId, e.streams[0].id);
                     this._attachRemoteScreenShare(socketId, e.streams[0]);
                     return;
                 }
+            } else if (e.track.kind === 'audio') {
+                // If this audio belongs to the screen share stream, skip —
+                // the screen share tile's video element already plays it via srcObject.
+                // Calling attachRemoteStream here would replace the camera+mic stream
+                // in the main tile, breaking the sharer's mic for everyone.
+                const screenStreamId = this.peerScreenShareStreamIds.get(socketId);
+                if (screenStreamId && screenStreamId === e.streams[0].id) return;
             }
             this.attachRemoteStream(socketId, userName, e.streams[0]);
         };
@@ -998,6 +1007,7 @@ class ZoomManager {
         const pc = this.peers.get(socketId);
         if (pc) { pc.close(); this.peers.delete(socketId); }
         this.peerVideoTrackCount.delete(socketId);
+        this.peerScreenShareStreamIds.delete(socketId);
         this.stopAudioAnalyzer(socketId);
         // Note: _peerIsInitiator and _peerReconnectCount are intentionally NOT cleared here
         // so reconnect logic can still read them after closePeer() is called.
@@ -1420,6 +1430,7 @@ class ZoomManager {
         this.peers.forEach((_, sid) => this.closePeer(sid));
         this.peers.clear();
         this.peerVideoTrackCount.clear();
+        this.peerScreenShareStreamIds.clear();
         // Clear reconnect state to prevent stale setTimeout callbacks from reconnecting to old peers
         this._peerIsInitiator.clear();
         this._peerReconnectCount.clear();
