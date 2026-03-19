@@ -286,6 +286,7 @@ class ZoomManager {
     }
 
     async onRoomJoined({ roomId, roomName, existingUsers, isHost, chatMode, permissions, emojisEnabled }) {
+        if (window.DebugPanel) DebugPanel.log('info', 'onRoomJoined', { roomId, existingUsers: existingUsers.map(u => u.name), localStream: !!this.localStream, streamTracks: this.localStream ? this.localStream.getTracks().map(t => t.kind + ':' + t.enabled + ':' + t.readyState) : [] });
         this.currentRoomId = roomId;
         if (!this.mainRoomId) this.mainRoomId = roomId;
         this.isHost = isHost;
@@ -972,6 +973,14 @@ class ZoomManager {
     async onOffer({ fromSocketId, fromName, offer }) {
         try {
             let pc = this.peers.get(fromSocketId);
+            // Replace a stale/closed PC — this happens when the host stays in the main room
+            // while participants enter breakout rooms and then return. The old PC is closed
+            // but still in this.peers, causing the signalingState guard below to bail out.
+            if (pc && (pc.signalingState === 'closed' || pc.connectionState === 'closed' || pc.connectionState === 'failed')) {
+                pc.close();
+                this.peers.delete(fromSocketId);
+                pc = null;
+            }
             if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
             // Handle glare: if we already sent an offer, rollback before accepting theirs
             if (pc.signalingState === 'have-local-offer') {
@@ -1370,6 +1379,7 @@ class ZoomManager {
     }
 
     onReturnToMain() {
+        if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain called', { inBreakout: this.inBreakout, mainRoomId: this.mainRoomId, currentRoomId: this.currentRoomId, peersCount: this.peers.size, localStream: !!this.localStream });
         const helpBtn = document.getElementById('zoom-btn-help');
         if (helpBtn) helpBtn.style.display = 'none';
         const returnBtn = document.getElementById('zoom-btn-return-main');
@@ -1378,6 +1388,7 @@ class ZoomManager {
         if (closeBreakoutBtn) closeBreakoutBtn.style.display = 'none';
         if (!this.inBreakout) {
             this._showToast('חדרי הפרצת נסגרו');
+            if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: not in breakout, skipping', {});
             return;
         }
         this._showToast('חוזרים לשיחה הראשית...');
@@ -1386,6 +1397,7 @@ class ZoomManager {
         this.inBreakout = false;
         this.currentRoomId = mainRoom;
         this.updateRoomLink(mainRoom);
+        if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: emitting zoom:request-join', { mainRoom, localStream: !!this.localStream, streamTracks: this.localStream ? this.localStream.getTracks().map(t => t.kind + ':' + t.enabled + ':' + t.readyState) : [] });
         this.startLocalStream().then(() => {
             this.socket.emit('zoom:request-join', { roomId: mainRoom, userName: this.userName, userId: this.userId });
         });
