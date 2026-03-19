@@ -2333,6 +2333,157 @@ class ZoomManager {
         };
         img.src = dataUrl;
     }
+
+    // ══ AI CHAT ══════════════════════════════════════════════════════════════
+
+    onShowAiTab() {
+        const hostControls = document.getElementById('ai-host-controls');
+        if (hostControls) hostControls.style.display = (this.isHost || this.isCoHost) ? 'block' : 'none';
+        this._updateAiLockUI();
+        this._renderAiMessages();
+    }
+
+    setAiMode(mode) {
+        this.aiMode = mode;
+        const btnPrivate = document.getElementById('ai-mode-private');
+        const btnPublic  = document.getElementById('ai-mode-public');
+        if (btnPrivate) btnPrivate.className = mode === 'private' ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline';
+        if (btnPublic)  btnPublic.className  = mode === 'public'  ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline';
+    }
+
+    toggleAiLock() {
+        const toggle = document.getElementById('ai-lock-toggle');
+        const locked = toggle ? toggle.checked : false;
+        this.socket.emit('zoom:ai-lock', { roomId: this.currentRoomId, locked });
+    }
+
+    onAiLockChanged({ locked }) {
+        this.aiLocked = locked;
+        this._updateAiLockUI();
+    }
+
+    _updateAiLockUI() {
+        const notice   = document.getElementById('ai-locked-notice');
+        const inputRow = document.getElementById('ai-input-row');
+        const modeRow  = document.getElementById('ai-mode-row');
+        const toggle   = document.getElementById('ai-lock-toggle');
+        const isManager = this.isHost || this.isCoHost;
+        if (toggle) toggle.checked = this.aiLocked;
+        if (this.aiLocked && !isManager) {
+            if (notice)   notice.style.display  = 'block';
+            if (inputRow) inputRow.style.display = 'none';
+            if (modeRow)  modeRow.style.display  = 'none';
+        } else {
+            if (notice)   notice.style.display  = 'none';
+            if (inputRow) inputRow.style.display = 'flex';
+            if (modeRow)  modeRow.style.display  = 'flex';
+        }
+    }
+
+    async sendAiMessage() {
+        if (this.aiLocked && !this.isHost && !this.isCoHost) {
+            this._showToast("הצ'אט עם AI נעול");
+            return;
+        }
+        const input = document.getElementById('ai-input');
+        const text = input ? input.value.trim() : '';
+        if (!text) return;
+        input.value = '';
+        const sendBtn = document.getElementById('ai-send-btn');
+        if (sendBtn) sendBtn.disabled = true;
+
+        this.aiMessages.push({ role: 'user', content: text });
+        this._renderAiMessages();
+        this._showAiTyping(true);
+
+        try {
+            const token = localStorage.getItem('authToken') || '';
+            const res = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ messages: this.aiMessages, roomId: this.currentRoomId, mode: this.aiMode })
+            });
+            const data = await res.json();
+            this._showAiTyping(false);
+            if (!res.ok) {
+                this._showToast(data.error || 'שגיאה ב-AI');
+                this.aiMessages.pop();
+            } else {
+                this.aiMessages.push({ role: 'assistant', content: data.reply });
+            }
+        } catch (e) {
+            this._showAiTyping(false);
+            this._showToast('שגיאה בחיבור ל-AI');
+            this.aiMessages.pop();
+        } finally {
+            if (sendBtn) sendBtn.disabled = false;
+            this._renderAiMessages();
+            const inp = document.getElementById('ai-input');
+            if (inp) inp.focus();
+        }
+    }
+
+    onAiPublicMessage({ from, question, answer }) {
+        const container = document.getElementById('ai-messages');
+        if (!container) return;
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'background:rgba(37,99,235,0.08);border-radius:10px;padding:10px;border-right:3px solid var(--primary);';
+        wrapper.innerHTML =
+            '<div style="font-size:0.75rem;color:var(--gray);margin-bottom:4px;">' +
+            '\uD83C\uDF10 <strong>' + this._escHtml(from) + '</strong> שאל בפומבי:</div>' +
+            '<div style="font-size:0.85rem;margin-bottom:8px;">' + this._escHtml(question) + '</div>' +
+            '<div style="font-size:0.75rem;color:var(--primary);margin-bottom:4px;">\uD83E\uDD16 AI ענה:</div>' +
+            '<div style="font-size:0.85rem;white-space:pre-wrap;">' + this._escHtml(answer) + '</div>';
+        container.appendChild(wrapper);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    _renderAiMessages() {
+        const container = document.getElementById('ai-messages');
+        if (!container) return;
+        container.innerHTML = '';
+        if (this.aiMessages.length === 0) {
+            container.innerHTML = '<div style="text-align:center;color:var(--gray);padding:24px;font-size:0.88rem;">👋 שלום! אני ה-AI שלך.<br>שאל אותי כל שאלה.</div>';
+            return;
+        }
+        this.aiMessages.forEach(msg => {
+            const isUser = msg.role === 'user';
+            const div = document.createElement('div');
+            div.style.cssText = isUser
+                ? 'background:rgba(37,99,235,0.2);border-radius:10px;padding:8px 12px;align-self:flex-end;max-width:85%;font-size:0.85rem;white-space:pre-wrap;word-break:break-word;'
+                : 'background:var(--dark3);border-radius:10px;padding:8px 12px;max-width:90%;font-size:0.85rem;white-space:pre-wrap;word-break:break-word;';
+            const label = isUser
+                ? '<span style="font-size:0.72rem;color:var(--gray);display:block;margin-bottom:3px;">אתה</span>'
+                : '<span style="font-size:0.72rem;color:var(--primary);display:block;margin-bottom:3px;">🤖 AI</span>';
+            div.innerHTML = label + this._escHtml(msg.content);
+            container.appendChild(div);
+        });
+        container.scrollTop = container.scrollHeight;
+    }
+
+    _showAiTyping(show) {
+        const container = document.getElementById('ai-messages');
+        if (!container) return;
+        const existing = container.querySelector('#ai-typing');
+        if (show && !existing) {
+            const div = document.createElement('div');
+            div.id = 'ai-typing';
+            div.style.cssText = 'background:var(--dark3);border-radius:10px;padding:8px 12px;font-size:0.85rem;color:var(--gray);';
+            div.textContent = '🤖 מקליד...';
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        } else if (!show && existing) {
+            existing.remove();
+        }
+    }
+
+    _escHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
 }
 
 window.zoomManager = new ZoomManager();
