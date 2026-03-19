@@ -2,10 +2,30 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>מערכת פגישות</title>
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <style>
+    /* iOS Safari: prevent elastic scroll on call UI */
+    .zoom-call-container { overscroll-behavior: none; }
+    /* Prevent text selection on buttons during touch */
+    button, .ctrl-btn, .create-meeting-card { -webkit-tap-highlight-color: transparent; touch-action: manipulation; user-select: none; }
+    /* Fix 100vh on mobile browsers (address bar) */
+    .zoom-call-container, .zoom-waiting-screen, .page-auth, .page-join {
+      min-height: 100dvh;
+    }
+    /* Larger touch targets for control buttons */
+    @media (max-width: 768px) {
+      .ctrl-btn { min-height: 44px; }
+      .zoom-panel-header button { min-width: 36px; min-height: 36px; }
+      .zoom-action-btn { padding: 6px 10px; }
+      input, select, textarea { font-size: 16px !important; } /* prevent iOS zoom on focus */
+    }
+  </style>
 </head>
 <body>
 
