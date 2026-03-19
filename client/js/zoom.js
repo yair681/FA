@@ -59,7 +59,6 @@ class ZoomManager {
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
-                // TURN servers — required when NAT/firewall blocks direct P2P after reconnect
                 {
                     urls: 'turn:openrelay.metered.ca:80',
                     username: 'openrelayproject',
@@ -985,17 +984,6 @@ class ZoomManager {
         try {
             // Close any existing peer connection for this socket before creating a new one
             if (this.peers.has(targetSocketId)) this.closePeer(targetSocketId);
-            // Glare tiebreaker: the side with the lexicographically higher socket ID always
-            // initiates the offer. The other side waits for the offer to arrive via onOffer.
-            // This prevents both sides from sending simultaneous offers after breakout return,
-            // which causes DTLS to stall in "connecting" and audio/video to never flow.
-            const myId = this.socket ? this.socket.id : '';
-            if (myId < targetSocketId) {
-                // We yield — create the PC so we're ready to receive their offer,
-                // but do NOT send an offer ourselves.
-                this.createPeerConnection(targetSocketId, targetName);
-                return;
-            }
             this._peerIsInitiator.add(targetSocketId);
             const pc = this.createPeerConnection(targetSocketId, targetName);
             const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
@@ -1019,13 +1007,19 @@ class ZoomManager {
                 pc = null;
             }
             if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
-            // Handle glare: if we already sent an offer (have-local-offer), close this PC
-            // and create a fresh one so we can accept the incoming offer cleanly.
-            // The tiebreaker in createOffer prevents this from happening on fresh connects,
-            // but it can still occur during ICE-failed reconnects.
+            // Handle glare (both sides sent offer simultaneously).
+            // Use "polite peer" pattern: the side with the lower socket ID is polite —
+            // it rolls back its own offer and accepts the incoming one.
+            // The impolite side (higher ID) ignores incoming offers when it already sent one.
             if (pc.signalingState === 'have-local-offer') {
-                this.closePeer(fromSocketId);
-                pc = this.createPeerConnection(fromSocketId, fromName);
+                const myId = this.socket ? this.socket.id : '';
+                const impolite = myId > fromSocketId;
+                if (impolite) {
+                    // We win the glare — ignore their offer, our offer stands
+                    return;
+                }
+                // We are polite — rollback and accept their offer
+                await pc.setLocalDescription({ type: 'rollback' });
             }
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
             await this._flushIceCandidates(fromSocketId);
@@ -1451,12 +1445,24 @@ class ZoomManager {
         if (closeBreakoutBtn) closeBreakoutBtn.style.display = 'none';
         if (!this.inBreakout) {
             // Host is in the main room receiving zoom:breakout-closed.
+            // Guard: if we already have connected peers, the reconnection already succeeded —
+            // do NOT reset again. A second zoom:breakout-closed from the old server would
+            // otherwise tear down the freshly-connected peers and silence everyone.
+            if (this.peers.size > 0) {
+                if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: host already has peers — ignoring duplicate breakout-closed', {});
+                return;
+            }
+            // Also debounce: ignore if we reset within the last 3 seconds
+            const now = Date.now();
+            if (this._lastBreakoutReset && (now - this._lastBreakoutReset) < 3000) {
+                if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: debounced duplicate breakout-closed', {});
+                return;
+            }
+            this._lastBreakoutReset = now;
             // Reset all peer connections so returning participants connect via fresh PCs.
-            // Without this, stale (but not yet ICE-failed) PCs accept re-offers with
-            // mismatched ICE credentials, causing silent audio/video failure.
             this._resetForBreakout();
             this.addLocalTile();
-            this._showToast('חדרי הפרצת נסגרו');
+            this._showToast('חדרי הפרצות נסגרו');
             if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: host in main room — reset peers, ready for participants', {});
             return;
         }
