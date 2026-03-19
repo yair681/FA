@@ -714,9 +714,11 @@ class ZoomManager {
             this._showToast('טיפ: סמן "שתף שמע מערכת" בחלון הדפדפן לשמע שיתוף מסך');
             this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'always' }, audio: { echoCancellation: false, noiseSuppression: false } });
             const videoTrack = this.screenStream.getVideoTracks()[0];
+            const audioTrack = this.screenStream.getAudioTracks()[0] || null;
             // Add screen share as an ADDITIONAL video track (don't replace camera)
             for (const [sid, pc] of this.peers.entries()) {
                 pc.addTrack(videoTrack, this.screenStream);
+                if (audioTrack) pc.addTrack(audioTrack, this.screenStream);
                 // Renegotiate so remote side gets the new track
                 try {
                     const offer = await pc.createOffer();
@@ -737,10 +739,14 @@ class ZoomManager {
     stopScreenShare() {
         if (!this.isScreenSharing) return;
         const screenVideoTrack = this.screenStream?.getVideoTracks()[0];
-        // Remove screen share sender from all peers
+        const screenAudioTrack = this.screenStream?.getAudioTracks()[0] || null;
+        // Remove screen share senders from all peers
         this.peers.forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track === screenVideoTrack);
-            if (sender) try { pc.removeTrack(sender); } catch(e) {}
+            pc.getSenders().forEach(sender => {
+                if (sender.track === screenVideoTrack || (screenAudioTrack && sender.track === screenAudioTrack)) {
+                    try { pc.removeTrack(sender); } catch(e) {}
+                }
+            });
         });
         this._removeLocalScreenShareTile();
         this.screenStream?.getTracks().forEach(t => t.stop());
@@ -856,10 +862,12 @@ class ZoomManager {
         if (this.localStream) {
             this.localStream.getTracks().forEach(t => pc.addTrack(t, this.localStream));
         }
-        // If screen sharing is active, also add the screen track as a second video track
+        // If screen sharing is active, also add the screen video + audio tracks
         if (this.isScreenSharing && this.screenStream) {
             const screenVideo = this.screenStream.getVideoTracks()[0];
             if (screenVideo) pc.addTrack(screenVideo, this.screenStream);
+            const screenAudio = this.screenStream.getAudioTracks()[0];
+            if (screenAudio) pc.addTrack(screenAudio, this.screenStream);
         }
         pc.onicecandidate = e => { if (e.candidate) this.socket.emit('zoom:ice-candidate', { targetSocketId: socketId, candidate: e.candidate }); };
         pc.ontrack = e => {
@@ -1198,6 +1206,8 @@ class ZoomManager {
         this._stopVBProcessing();
         const overlay = document.getElementById('breakout-timer-overlay');
         if (overlay) overlay.style.display = 'none';
+        const closeBreakoutBtn2 = document.getElementById('zoom-btn-close-breakout');
+        if (closeBreakoutBtn2) closeBreakoutBtn2.style.display = 'none';
         ['zoom-audio-btn','zoom-video-btn','zoom-screen-btn'].forEach(id => {
             const btn = document.getElementById(id); if (btn) btn.disabled = false;
         });
@@ -1346,6 +1356,8 @@ class ZoomManager {
         if (helpBtn) helpBtn.style.display = 'none';
         const returnBtn = document.getElementById('zoom-btn-return-main');
         if (returnBtn) returnBtn.style.display = 'none';
+        const closeBreakoutBtn = document.getElementById('zoom-btn-close-breakout');
+        if (closeBreakoutBtn) closeBreakoutBtn.style.display = 'none';
         if (!this.inBreakout) {
             this._showToast('חדרי הפרצת נסגרו');
             return;
@@ -1408,6 +1420,9 @@ class ZoomManager {
         this.peers.forEach((_, sid) => this.closePeer(sid));
         this.peers.clear();
         this.peerVideoTrackCount.clear();
+        // Clear reconnect state to prevent stale setTimeout callbacks from reconnecting to old peers
+        this._peerIsInitiator.clear();
+        this._peerReconnectCount.clear();
         this.audioAnalyzers.forEach((_, id) => this.stopAudioAnalyzer(id));
         if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null; }
         const grid = document.getElementById('zoom-video-grid');
@@ -1418,6 +1433,17 @@ class ZoomManager {
         if (!this.isHost && !this.isCoHost) return;
         const roomId = this.mainRoomId || this.currentRoomId;
         this.socket.emit('zoom:close-breakout-rooms', { roomId });
+    }
+
+    // Called from toolbar button — closes all breakout rooms and returns host to main room
+    closeBreakoutRoomsAndReturn() {
+        if (!this.isHost && !this.isCoHost) return;
+        if (!confirm('לסגור את כל חדרי הפרצות ולהחזיר את כולם לחדר הראשי?')) return;
+        this.closeBreakoutRooms();
+        // If host is currently visiting a breakout room, also return them to main
+        if (this.inBreakout) {
+            setTimeout(() => this.onReturnToMain(), 300);
+        }
     }
 
     // ── Virtual Background ────────────────────────────────────────────────────
@@ -2080,9 +2106,13 @@ class ZoomManager {
         this.inBreakout = true;
         this.currentRoomId = brRoomId;
         this.updateRoomLink(brRoomId);
-        // Show return-to-main button for host/cohost
+        // Show return-to-main and close-breakout buttons for host/cohost
         const returnBtn = document.getElementById('zoom-btn-return-main');
         if (returnBtn) returnBtn.style.display = '';
+        if (this.isHost || this.isCoHost) {
+            const closeBtn = document.getElementById('zoom-btn-close-breakout');
+            if (closeBtn) closeBtn.style.display = '';
+        }
         this.startLocalStream().then(() => {
             this.addLocalTile();
             peers.forEach(p => {
