@@ -963,13 +963,6 @@ class ZoomManager {
 
     async onOffer({ fromSocketId, fromName, offer }) {
         try {
-            // Ensure local stream is ready before creating the peer connection.
-            // Without this, participants returning from breakout rooms simultaneously
-            // may receive offers before startLocalStream() finishes, causing the
-            // connection to be created with no audio/video tracks.
-            if (!this.localStream) {
-                try { await this.startLocalStream(); } catch(e) {}
-            }
             let pc = this.peers.get(fromSocketId);
             if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
             // Handle glare: if we already sent an offer, rollback before accepting theirs
@@ -1442,7 +1435,10 @@ class ZoomManager {
         this._peerIsInitiator.clear();
         this._peerReconnectCount.clear();
         this.audioAnalyzers.forEach((_, id) => this.stopAudioAnalyzer(id));
-        if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null; }
+        // Do NOT stop localStream here — keep the camera/mic alive across room transitions.
+        // Stopping it causes a race condition: multiple concurrent callers (onOffer, onReturnToMain)
+        // all call startLocalStream() at once, creating duplicate streams and broken audio.
+        // fullReset() is responsible for stopping the stream when truly leaving the call.
         const grid = document.getElementById('zoom-video-grid');
         if (grid) grid.innerHTML = '';
     }
