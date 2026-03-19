@@ -329,9 +329,15 @@ io.on('connection', (socket) => {
     if (room.users.has(socket.id)) {
       const isHostUser = socket.id === room.hostSocketId;
       const u = room.users.get(socket.id);
+      // Exclude participants who are currently in breakout rooms so the returning
+      // host only reconnects to people actually in the main room
+      const breakoutSids = new Set();
+      if (room.breakout && room.breakout.active) {
+        room.breakout.rooms.forEach(br => br.participants.forEach(sid => breakoutSids.add(sid)));
+      }
       const existingUsers = [];
       room.users.forEach((ru, sid) => {
-        if (sid !== socket.id) existingUsers.push({ socketId: sid, name: ru.name, isCoHost: ru.isCoHost, isHost: sid === room.hostSocketId });
+        if (sid !== socket.id && !breakoutSids.has(sid)) existingUsers.push({ socketId: sid, name: ru.name, isCoHost: ru.isCoHost, isHost: sid === room.hostSocketId });
       });
       socket.join(roomId);
       socket.emit('zoom:room-joined', {
