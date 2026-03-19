@@ -963,6 +963,13 @@ class ZoomManager {
 
     async onOffer({ fromSocketId, fromName, offer }) {
         try {
+            // Ensure local stream is ready before creating the peer connection.
+            // Without this, participants returning from breakout rooms simultaneously
+            // may receive offers before startLocalStream() finishes, causing the
+            // connection to be created with no audio/video tracks.
+            if (!this.localStream) {
+                try { await this.startLocalStream(); } catch(e) {}
+            }
             let pc = this.peers.get(fromSocketId);
             if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
             // Handle glare: if we already sent an offer, rollback before accepting theirs
