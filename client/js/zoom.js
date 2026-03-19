@@ -359,7 +359,7 @@ class ZoomManager {
         const msg = reason === 'admin' ? 'הפגישה נסגרה על ידי מנהל המערכת.' : 'המארח סיים את הפגישה.';
         if (this.userRole === 'guest') { this._showGuestEndedScreen(msg); return; }
         if (!this.isHost) this._showToast(msg);
-        this.fullReset();
+        this.fullReset(true); // שמור את הסטרים כדי שיהיה אפשר להצטרף לחדר אחר מיד
     }
 
     onRoleChanged({ role }) {
@@ -1206,11 +1206,13 @@ class ZoomManager {
         this.fullReset();
     }
 
-    fullReset() {
+    fullReset(keepStream = false) {
         this.peers.forEach((_, sid) => this.closePeer(sid));
         this.peers.clear();
         this.audioAnalyzers.forEach((_, id) => this.stopAudioAnalyzer(id));
-        if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null; }
+        if (!keepStream) {
+            if (this.localStream) { this.localStream.getTracks().forEach(t => t.stop()); this.localStream = null; }
+        }
         if (this.screenStream) { this.screenStream.getTracks().forEach(t => t.stop()); this.screenStream = null; }
         this.currentRoomId = null; this.mainRoomId = null;
         this.isHost = false; this.isCoHost = false;
