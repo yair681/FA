@@ -900,6 +900,12 @@ class ZoomManager {
                 null
             );
             // 'disconnected' is transient — wait before acting.
+            if (state === 'failed' || state === 'closed') {
+                // Guard against stale callbacks: if this pc was replaced by a newer one
+                // (e.g. after _resetForBreakout + onRoomJoined), ignore the event so we
+                // don't close the new peer connection or remove a freshly-added tile.
+                if (this.peers.get(socketId) !== pc) return;
+            }
             if (state === 'failed') {
                 const retries = this._peerReconnectCount.get(socketId) || 0;
                 if (retries < 2 && this._peerIsInitiator.has(socketId)) {
