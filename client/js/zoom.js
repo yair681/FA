@@ -1390,8 +1390,14 @@ class ZoomManager {
         const closeBreakoutBtn = document.getElementById('zoom-btn-close-breakout');
         if (closeBreakoutBtn) closeBreakoutBtn.style.display = 'none';
         if (!this.inBreakout) {
+            // Host is in the main room receiving zoom:breakout-closed.
+            // Reset all peer connections so returning participants connect via fresh PCs.
+            // Without this, stale (but not yet ICE-failed) PCs accept re-offers with
+            // mismatched ICE credentials, causing silent audio/video failure.
+            this._resetForBreakout();
+            this.addLocalTile();
             this._showToast('חדרי הפרצת נסגרו');
-            if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: not in breakout, skipping', {});
+            if (window.DebugPanel) DebugPanel.log('info', 'onReturnToMain: host in main room — reset peers, ready for participants', {});
             return;
         }
         this._showToast('חוזרים לשיחה הראשית...');

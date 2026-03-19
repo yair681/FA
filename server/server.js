@@ -166,9 +166,23 @@ function breakoutToArray(roomsMap) {
 
 function closeBreakoutRooms(room, roomId) {
   room.breakout.active = false;
-  room.breakout.rooms.forEach(br => br.participants.forEach(sid => io.to(sid).emit('zoom:return-to-main', { mainRoomId: roomId })));
+  // Collect breakout participant sids BEFORE clearing the rooms
+  const breakoutSids = new Set();
+  room.breakout.rooms.forEach(br => {
+    br.participants.forEach(sid => {
+      breakoutSids.add(sid);
+      io.to(sid).emit('zoom:return-to-main', { mainRoomId: roomId });
+    });
+  });
   room.breakout.rooms.clear();
-  io.to(roomId).emit('zoom:breakout-closed');
+  // Send zoom:breakout-closed ONLY to users in the main room (not breakout participants
+  // who are already getting zoom:return-to-main — sending both causes onReturnToMain
+  // to fire twice on participants, breaking freshly-established reconnections)
+  room.users.forEach((u, sid) => {
+    if (!breakoutSids.has(sid)) {
+      io.to(sid).emit('zoom:breakout-closed');
+    }
+  });
 }
 
 // ── Debug: wrap socket handlers with try/catch ────────────────────────────────
