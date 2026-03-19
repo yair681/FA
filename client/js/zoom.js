@@ -985,6 +985,17 @@ class ZoomManager {
         try {
             // Close any existing peer connection for this socket before creating a new one
             if (this.peers.has(targetSocketId)) this.closePeer(targetSocketId);
+            // Glare tiebreaker: the side with the lexicographically higher socket ID always
+            // initiates the offer. The other side waits for the offer to arrive via onOffer.
+            // This prevents both sides from sending simultaneous offers after breakout return,
+            // which causes DTLS to stall in "connecting" and audio/video to never flow.
+            const myId = this.socket ? this.socket.id : '';
+            if (myId < targetSocketId) {
+                // We yield — create the PC so we're ready to receive their offer,
+                // but do NOT send an offer ourselves.
+                this.createPeerConnection(targetSocketId, targetName);
+                return;
+            }
             this._peerIsInitiator.add(targetSocketId);
             const pc = this.createPeerConnection(targetSocketId, targetName);
             const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
@@ -1008,11 +1019,14 @@ class ZoomManager {
                 pc = null;
             }
             if (!pc) pc = this.createPeerConnection(fromSocketId, fromName);
-            // Handle glare: if we already sent an offer, rollback before accepting theirs
+            // Handle glare: if we already sent an offer (have-local-offer), close this PC
+            // and create a fresh one so we can accept the incoming offer cleanly.
+            // The tiebreaker in createOffer prevents this from happening on fresh connects,
+            // but it can still occur during ICE-failed reconnects.
             if (pc.signalingState === 'have-local-offer') {
-                await pc.setLocalDescription({ type: 'rollback' });
+                this.closePeer(fromSocketId);
+                pc = this.createPeerConnection(fromSocketId, fromName);
             }
-            if (pc.signalingState !== 'stable' && pc.signalingState !== 'have-remote-offer') return;
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
             await this._flushIceCandidates(fromSocketId);
             const answer = await pc.createAnswer();
